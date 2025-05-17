@@ -1,0 +1,4 @@
+connect vao postgress: psql -U admin -d postgresql 
+pgvector: cai dat: docker pull pgvector/pgvector:pg17
+                    docker exec -it 208 bash
+                    apt update && apt install -y postgresql-17-vector

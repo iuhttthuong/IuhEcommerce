@@ -1,0 +1,28 @@
+version: "3.8"
+services:
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant_service
+    restart: always
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  postgres:
+    image: postgres
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: E_commerce_chatbot
+      POSTGRES_PASSWORD: E_commerce_chatbot
+      POSTGRES_DB: E_commerce_chatbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+  qdrant_data: 
