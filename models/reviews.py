@@ -30,9 +30,6 @@ class ReviewCreatePayload(BaseModel):
         validate_by_name = True
         use_enum_values = True
 class ReviewUpdatePayload(BaseModel):
-    review_id: int
-    product_id: int
-    customer_id: int
     rating: int
     comment: str
     review_date: datetime

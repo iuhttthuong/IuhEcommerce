@@ -55,3 +55,7 @@ __pycache__
 
 *.csv
 *.txt
+
+qdrand_storage/
+*.json
+postgres/

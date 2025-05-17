@@ -41,9 +41,6 @@ user_proxy = ConversableAgent(
     ),human_input_mode="NEVER",
 )
 
-class ChatbotRequest(BaseModel):
-    chat_id: int
-    message: str
 
 router = APIRouter(prefix="/chatbot", tags=["Chatbot"])
 
@@ -58,15 +55,16 @@ def get_fqa(payload: str, collection_name: str = "poli_embeddings", limit: int =
         raise HTTPException(status_code=404, detail="Không tìm thấy thông tin")
     with Session() as session:
         fqa = session.query(FQA).filter(FQA.id == search_result[0]).first()
+        print(f"FQA: {fqa.answer}")
         if not fqa:
             raise HTTPException(status_code=404, detail="Không tìm thấy thông tin")
     return fqa.answer
 
 
 @router.post("/ask")
-def ask_chatbot(request: ChatbotRequest):
+def ask_chatbot(request: str):
     try:
-        message = request.message
+        message = request
 
         # # Lưu tin nhắn vào cơ sở dữ liệu
         # message_repository = MessageRepository()
@@ -78,6 +76,8 @@ def ask_chatbot(request: ChatbotRequest):
         # message_repository.create(message_payload)
 
         # Tạo câu hỏi cho agent
+        # print(search(request))
+        # get_fqa(request, collection_name="poli_embeddings", limit=1)
         question = f"Người dùng hỏi: {message}"
 
         register_function(
@@ -93,7 +93,7 @@ def ask_chatbot(request: ChatbotRequest):
             function_call={"name": "search"},
             function_args={"payload": message, "collection_name": "poli_embeddings", "limit": 1},
             auto_reply=True,
-            # silent=True  # Ẩn tin nhắn này trong lịch sử chat
+            silent=True  # Ẩn tin nhắn này trong lịch sử chat
         )
         print(f"Response from assistant: {chat_result.summary}")
         # Lưu phản hồi vào cơ sở dữ liệu
@@ -114,9 +114,5 @@ def ask_chatbot(request: ChatbotRequest):
 
 
 # test
-# asyncio.run(ask_chatbot(
-#     ChatbotRequest(
-#         chat_id=1,
-#         message="hãy nói về chính sách bao hành của IUH-Ecommerce"
-#     )
-# ))
+# asyncio.run(ask_chatbot("hãy nói về chính sách bao hành của IUH-Ecommerce"))
+# ask_chatbot("hãy nói về chính sách bao hành của IUH-Ecommerce")
