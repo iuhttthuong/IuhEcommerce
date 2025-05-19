@@ -5,12 +5,12 @@ from services.chat import ChatService
 
 router = APIRouter(prefix="/chats", tags=["Chats"])
 
-@router.post("/", response_model=ChatModel)
+@router.post("/add", response_model=ChatModel)
 def create_chat(payload: ChatCreate):
     return ChatService.create_chat(payload)
 
 
-@router.get("/{chat_id}", response_model=ChatModel)
+@router.get("/get/{chat_id}", response_model=ChatModel)
 def get_chat(chat_id):
     chat = ChatService.get_chat(chat_id)
     if not chat:
@@ -18,7 +18,7 @@ def get_chat(chat_id):
     return chat
 
 
-@router.put("/{chat_id}", response_model=ChatModel)
+@router.put("update/{chat_id}", response_model=ChatModel)
 def update_chat(chat_id, payload: UpdateChatPayload):
     chat = ChatService.update_chat(chat_id, payload)
     if not chat:
@@ -26,7 +26,7 @@ def update_chat(chat_id, payload: UpdateChatPayload):
     return chat
 
 
-@router.delete("/{chat_id}")
+@router.delete("/delete/{chat_id}")
 def delete_chat(chat_id):
     ChatService.delete_chat(chat_id)
     return {"message": "Chat deleted successfully"}
@@ -34,6 +34,4 @@ def delete_chat(chat_id):
 @router.get("/user/{user_id}", response_model=list[ChatModel])
 def get_chat_by_user_id(user_id: int):
     chats = ChatService.get_chat_by_user_id(user_id)
-    if not chats:
-        raise HTTPException(status_code=404, detail="No chats found for this user")
     return chats

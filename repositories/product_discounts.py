@@ -13,9 +13,9 @@ class ProductDiscountRepositories:
             return ProductDiscountModel.model_validate(new_product_discount)
 
     @staticmethod
-    def delete(payload: ProductDiscountCreate):
+    def delete(id: int):
         with Session() as session:
-            product_discount = session.get(ProductDiscount, (payload.product_id, payload.discount_id))
+            product_discount = session.get(ProductDiscount, id)
             if not product_discount:
                 return None
             session.delete(product_discount)

@@ -5,12 +5,12 @@ from services.message import MessageService
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
 
-@router.post("/", response_model=MessageModel, status_code=status.HTTP_201_CREATED)
+@router.post("/add", response_model=MessageModel, status_code=status.HTTP_201_CREATED)
 def create_message(payload: CreateMessagePayload):
     return MessageService.create_message(payload)
 
 
-@router.get("/{message_id}", response_model=MessageModel)
+@router.get("/get/{message_id}", response_model=MessageModel)
 def get_message(message_id: int):
     try:
         message = MessageService.get_message(message_id)
@@ -19,7 +19,7 @@ def get_message(message_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
 
-@router.put("/{message_id}", response_model=MessageModel)
+@router.put("/update/{message_id}", response_model=MessageModel)
 def update_message(message_id: int, payload: UpdateMessagePayload):
     try:
         message = MessageService.update_message(message_id, payload)
@@ -28,7 +28,7 @@ def update_message(message_id: int, payload: UpdateMessagePayload):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
 
-@router.delete("/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/delete/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_message(message_id: int):
     try:
         MessageService.delete_message(message_id)

@@ -5,8 +5,8 @@ from agent.parsing_agent import ParsingAgent
 from services.search import SearchServices
 from services.products import ProductServices
 
-router = APIRouter(tags=["search"])
-@router.get("/search")
+router = APIRouter(prefix="/search", tags=["search"])
+@router.get("/")
 def search(query: str, collection_name: str = "product_name_embeddings", limit: int = 5):
     # schema = ParsingAgent.initiate_parsing(query)
     # Schema = str(schema)

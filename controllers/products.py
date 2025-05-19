@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from models.products import Product, ProductModel, ProductCreate
 from services.products import ProductServices
 
-router = APIRouter(tags=["products"])
+router = APIRouter(prefix="/products", tags=["products"])
 @router.post("/add", response_model=ProductModel)
 def create(product: ProductCreate):
     """

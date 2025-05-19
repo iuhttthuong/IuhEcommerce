@@ -10,8 +10,8 @@ class ProductDiscountService:
         return ProductDiscountRepositories.create(payload)
 
     @staticmethod
-    def delete(payload: ProductDiscountCreate):
+    def delete(id: int):
         """
         Delete a product discount by ID.
         """
-        return ProductDiscountRepositories.delete(payload)
+        return ProductDiscountRepositories.delete(id)

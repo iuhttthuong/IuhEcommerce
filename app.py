@@ -18,11 +18,17 @@ from controllers import (discounts,
                         qdrant_agent,
                         manager,
                         reviews,
+                        shopping_carts,
+                        cart_items,
 )
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
+
 from env import env
+
+
+
 
 # Migrate the database to its latest version
 # Not thread safe, so it should be update once we are running multiple instances
@@ -52,6 +58,8 @@ app.include_router(polici_agent.router, prefix="/api")
 app.include_router(qdrant_agent.router, prefix="/api")
 app.include_router(manager.router, prefix="/api")
 app.include_router(reviews.router, prefix="/api")
+app.include_router(shopping_carts.router, prefix="/api")
+app.include_router(cart_items.router, prefix="/api")
 
 
 class StaticFileMiddleware(BaseHTTPMiddleware):
@@ -68,3 +76,4 @@ class StaticFileMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(StaticFileMiddleware)
+

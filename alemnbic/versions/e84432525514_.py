@@ -115,7 +115,7 @@ def upgrade() -> None:
         sa.Column("tag_id", sa.Integer, sa.ForeignKey("product_tags.tag_id")),
         sa.PrimaryKeyConstraint("product_id", "tag_id")
     )
-
+    
 def downgrade() -> None:
     op.drop_table("product_tag_relations")
     op.drop_table("product_tags")
