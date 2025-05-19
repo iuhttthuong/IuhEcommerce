@@ -1,0 +1,2 @@
+Get-Content scripts/create_shops_table.sql | docker exec -i postgres psql -U E_commerce_chatbot -d E_commerce_chatbot
+docker cp scripts/insert_shop_data.sql postgres:/insert_shop_data.sql; docker exec -u postgres postgres psql -U E_commerce_chatbot -d E_commerce_chatbot -f /insert_shop_data.sql
