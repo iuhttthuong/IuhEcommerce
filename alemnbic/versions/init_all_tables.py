@@ -1,8 +1,8 @@
 """init all tables
 
-Revision ID: 5d288a0b8f0b
-Revises: 
-Create Date: 2024-03-19 10:00:00.000000
+Revision ID: init_all_tables
+Revises: reset_migration_base
+Create Date: 2024-03-19
 
 """
 from typing import Sequence, Union
@@ -26,8 +26,8 @@ class VectorType(TypeDecorator):
         return value
 
 # revision identifiers, used by Alembic.
-revision: str = '5d288a0b8f0b'
-down_revision: Union[str, None] = None
+revision: str = 'init_all_tables'
+down_revision: Union[str, None] = 'reset_migration_base'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -103,19 +103,23 @@ def upgrade() -> None:
     # Create shops table
     op.execute("""
     CREATE TABLE IF NOT EXISTS shops (
-        seller_id INTEGER NOT NULL,
+        shop_id INTEGER NOT NULL,
         username VARCHAR(50) NOT NULL,
         password VARCHAR(255) NOT NULL,
-        name VARCHAR(100) NOT NULL,
-        mail VARCHAR(100),
+        email VARCHAR(100) NOT NULL,
+        shop_name VARCHAR(100) NOT NULL,
+        description TEXT,
+        logo_url VARCHAR(255),
         address TEXT,
         phone VARCHAR(20),
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        rating DECIMAL(3,2),
+        last_login TIMESTAMP,
         created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (seller_id),
-        FOREIGN KEY (seller_id) REFERENCES sellers(seller_id),
+        PRIMARY KEY (shop_id),
         UNIQUE (username),
-        UNIQUE (mail)
+        UNIQUE (email)
     )
     """)
 
@@ -445,11 +449,28 @@ def upgrade() -> None:
     )
     """)
 
+    # Create chat table with all necessary fields
+    op.execute("""
+    CREATE TABLE IF NOT EXISTS chat (
+        chat_id INTEGER NOT NULL,
+        user_id INTEGER,
+        shop_id INTEGER,
+        role VARCHAR(50),
+        context VARCHAR,
+        message TEXT NOT NULL,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (chat_id),
+        FOREIGN KEY (shop_id) REFERENCES shops(shop_id) ON DELETE SET NULL,
+        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
+    )
+    """)
+
 
 def downgrade() -> None:
     # Drop tables in reverse order
     tables = [
-        'product_tag_relations', 'product_tags', 'customer_addresses', 
+        'chat', 'product_tag_relations', 'product_tags', 'customer_addresses', 
         'customer_coupons', 'search_logs', 'coupons', 'cart_items',
         'product_imports', 'shopping_carts', 'wishlist_items', 'sessions',
         'user_role_assignments', 'wishlists', 'user_roles', 'users',

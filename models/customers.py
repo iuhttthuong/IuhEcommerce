@@ -2,7 +2,8 @@
 from datetime import datetime
 from models.base import Base, TimestampMixin
 from sqlalchemy import  String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import List
 from pydantic import BaseModel, ConfigDict
 
 class Customer(Base):
@@ -16,6 +17,12 @@ class Customer(Base):
     customer_phone: Mapped[str] = mapped_column(String(20), nullable=False)
     customer_dob: Mapped[datetime] = mapped_column(String(20), nullable=False)
     customer_gender: Mapped[str] = mapped_column(String(10), nullable=False)
+
+    # Relationships
+    chats: Mapped[List["Chat"]] = relationship("Chat", back_populates="customer")
+    order_status_updates: Mapped[List["OrderStatus"]] = relationship("OrderStatus", back_populates="customer")
+    service_tickets: Mapped[List["CustomerService"]] = relationship("CustomerService", back_populates="customer", foreign_keys="CustomerService.customer_id")
+    assigned_tickets: Mapped[List["CustomerService"]] = relationship("CustomerService", back_populates="assignee", foreign_keys="CustomerService.assigned_to")
 
 class CustomerCreate(BaseModel):
     customer_fname: str

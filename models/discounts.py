@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import List
 from sqlalchemy import ForeignKey, DECIMAL, TIMESTAMP
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pydantic import BaseModel
 from models.base import Base
 
@@ -14,6 +15,9 @@ class Discount(Base):
     is_active: Mapped[bool] = mapped_column(nullable=False)
     min_purchase_amount: Mapped[int] = mapped_column(nullable=False)
     max_discount_amount: Mapped[int] = mapped_column(nullable=False)
+
+    # Relationships
+    products: Mapped[List["Product"]] = relationship("Product", secondary="product_discounts", back_populates="discounts", overlaps="product_discounts")
 
 class DiscountCreate(BaseModel):
     discount_name: str

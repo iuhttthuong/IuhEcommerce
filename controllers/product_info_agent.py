@@ -9,7 +9,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from env import env
-from models.message import CreateMessagePayload
+from models.chats import ChatMessageCreate
 from repositories.message import MessageRepository
 from services.products import ProductServices
 from services.search import SearchServices

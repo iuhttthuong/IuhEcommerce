@@ -8,7 +8,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from env import env
-from models.message import CreateMessagePayload
+from models.chats import ChatMessageCreate
 from repositories.message import MessageRepository
 from services.products import ProductServices
 from services.search import SearchServices
@@ -233,15 +233,15 @@ class SearchDiscoveryAgent:
             
             # Lưu thông tin tương tác vào message repository
             message_repository = MessageRepository()
-            response_payload = CreateMessagePayload(
+            response_payload = ChatMessageCreate(
                 chat_id=request.chat_id,
-                role="assistant",
+                sender_type="assistant",
+                sender_id=0,  # You may need to adjust this based on your requirements
                 content=response_content,
                 metadata={
-                    "search_type": search_info.get("search_type"),
-                    "query": search_query,
-                    "filters": filters,
-                    "result_count": len(sorted_products)
+                    "intent": "product_search",
+                    "entities": request.entities,
+                    "confidence": 0.8  # Assuming a default confidence value
                 }
             )
             message_repository.create(response_payload)

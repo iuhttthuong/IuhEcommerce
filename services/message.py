@@ -1,29 +1,38 @@
 import uuid
-from models.message import CreateMessagePayload, UpdateMessagePayload, MessageModel
+from models.chats import ChatMessageCreate, ChatMessageResponse, UpdateMessagePayload
 from repositories.message import MessageRepository
 
 
 class MessageService:
     @staticmethod
-    def create_message(payload: CreateMessagePayload) -> MessageModel:
-        return MessageRepository.create(payload)
+    def create_message(payload: ChatMessageCreate) -> ChatMessageResponse:
+        message = MessageRepository.create_message(payload)
+        return ChatMessageResponse.model_validate(message)
 
     @staticmethod
-    def get_message(message_id: int) -> MessageModel:
-        return MessageRepository.get_one(message_id)
+    def get_message(message_id: int) -> ChatMessageResponse:
+        message = MessageRepository.get_message(message_id)
+        if not message:
+            raise ValueError(f"Message with ID {message_id} not found")
+        return ChatMessageResponse.model_validate(message)
 
     @staticmethod
-    def update_message(message_id: int, data: UpdateMessagePayload) -> MessageModel:
-        return MessageRepository.update(message_id, data)
+    def update_message(message_id: int, payload: UpdateMessagePayload) -> ChatMessageResponse:
+        message = MessageRepository.update_message(message_id, payload)
+        if not message:
+            raise ValueError(f"Message with ID {message_id} not found")
+        return ChatMessageResponse.model_validate(message)
 
     @staticmethod
     def delete_message(message_id: int) -> None:
-        return MessageRepository.delete(message_id)
+        MessageRepository.delete_message(message_id)
 
     @staticmethod
-    def get_recent_messages(chat_id: int, limit: int = 5) -> list[MessageModel]:
-        return MessageRepository.get_recent_messages(chat_id, limit)
+    def get_recent_messages(chat_id: int, limit: int = 5) -> list[ChatMessageResponse]:
+        messages = MessageRepository.get_recent_messages(chat_id, limit)
+        return [ChatMessageResponse.model_validate(msg) for msg in messages]
 
     @staticmethod
-    def get_all_messages_in_chat(chat_id: int) -> list[MessageModel]:
-        return MessageRepository.get_all_messages_in_chat(chat_id)
+    def get_all_messages_in_chat(chat_id: int) -> list[ChatMessageResponse]:
+        messages = MessageRepository.get_all_messages_in_chat(chat_id)
+        return [ChatMessageResponse.model_validate(msg) for msg in messages]

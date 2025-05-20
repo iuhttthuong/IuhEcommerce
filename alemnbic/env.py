@@ -26,7 +26,8 @@ from models.sellers import Seller
 from models.products import Product
 from models.customers import Customer
 from models.orders import Order
-from models.shop import Shop
+from models.shops import Shop
+from models.brands import Brand
 from models.product_embeddings import ProductEmbedding
 from models.product_attributes import ProductAttribute
 from models.product_specifications import ProductSpecification
@@ -49,7 +50,7 @@ from models.customer_addresses import CustomerAddress
 from models.product_tags import ProductTag
 from models.product_tag_relations import ProductTagRelation
 from models.categories import Category
-from models.chat import Chat
+from models.chats import Chat
 
 config = context.config
 config.set_section_option('alembic', 'sqlalchemy.url', SQLALCHEMY_DATABASE_URL)

@@ -34,7 +34,7 @@ def get_similar_products(product_id: int, limit: int = 5) -> List[Dict[str, Any]
         # Search similar products
         similar_products = qdrant.search(
             collection_name=COLLECTIONS["products"],
-            query_vector={"default": vector},
+            query_vector=("default", vector),  # Specify vector name and vector
             limit=limit + 1,  # Get one more to exclude the original product
             with_payload=True
         )
@@ -110,7 +110,7 @@ def get_text_based_recommendations(query_text: str, limit: int = 5, score_thresh
         # Search for relevant products with lower threshold to catch more matches
         product_results = qdrant.search(
             collection_name=COLLECTIONS["products"],
-            query_vector={"default": query_vector},
+            query_vector=("default", query_vector),  # Specify vector name and vector
             limit=limit + 5,  # Get more results to filter by relevance
             with_payload=True,
             score_threshold=score_threshold  # Use the provided threshold

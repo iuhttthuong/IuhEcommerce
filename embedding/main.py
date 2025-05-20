@@ -16,7 +16,7 @@ from embedding.process import (
 from db import Session
 from models.products import Product
 from models.fqas import FQA
-from models.chat import Chat
+from models.chats import Chat
 from models.categories import Category
 from models.reviews import Review
 from repositories.products import ProductRepositories
@@ -89,7 +89,7 @@ def add_product_to_qdrant(product_id: int):
         if embedding:
             point = PointStruct(
                 id=product_id,
-                vector={"default": embedding},
+                vector=embedding,
                 payload={
                     "product_id": product_id,
                     "name": product.name,
@@ -101,7 +101,8 @@ def add_product_to_qdrant(product_id: int):
                     "rating_average": product.rating_average,
                     "text_content": product_data,
                     "embedding_type": "product"
-                }
+                },
+                vector_name="default"
             )
             qdrant.upsert(collection_name=COLLECTIONS["products"], points=[point])
             print(f"✅ Đã thêm embedding cho sản phẩm ID {product_id}.")
@@ -129,14 +130,15 @@ def add_faq_to_qdrant(faq_id: int):
             
             point = PointStruct(
                 id=faq_id,
-                vector={"default": embedding},
+                vector=embedding,
                 payload={
                     "faq_id": faq_id,
                     "question": question,
                     "answer": answer,
                     "text_content": faq_data,
                     "embedding_type": "faq"
-                }
+                },
+                vector_name="default"
             )
             qdrant.upsert(collection_name=COLLECTIONS["faqs"], points=[point])
             print(f"✅ Đã thêm embedding cho FAQ ID {faq_id}.")
@@ -156,7 +158,7 @@ def add_review_to_qdrant(review_id: int):
         if embedding:
             point = PointStruct(
                 id=review_id,
-                vector={"default": embedding},
+                vector=embedding,
                 payload={
                     "review_id": review_id,
                     "product_id": review_info.get("product_id", ""),
@@ -165,7 +167,8 @@ def add_review_to_qdrant(review_id: int):
                     "comment": review_info.get("comment", ""),
                     "text_content": review_data,
                     "embedding_type": "review"
-                }
+                },
+                vector_name="default"
             )
             qdrant.upsert(collection_name=COLLECTIONS["reviews"], points=[point])
             print(f"✅ Đã thêm embedding cho Review ID {review_id}.")
@@ -207,14 +210,15 @@ def add_category_to_qdrant(category_id: int):
             
             point = PointStruct(
                 id=qdrant_id,
-                vector={"default": embedding},
+                vector=embedding,
                 payload={
                     "category_id": str(category_id),  # Lưu ID gốc dưới dạng chuỗi
                     "name": name,
                     "path": path,
                     "text_content": category_data,
                     "embedding_type": "category"
-                }
+                },
+                vector_name="default"
             )
             qdrant.upsert(collection_name=COLLECTIONS["categories"], points=[point])
             print(f"✅ Đã thêm embedding cho Category ID {category_id}.")
@@ -262,7 +266,7 @@ def add_chat_to_qdrant(chat_id: int):
         if embedding:
             point = PointStruct(
                 id=chat_id,
-                vector={"default": embedding},
+                vector=embedding,
                 payload={
                     "chat_id": chat_id,
                     "session_id": chat_info.session_id,
@@ -271,7 +275,8 @@ def add_chat_to_qdrant(chat_id: int):
                     "message_count": len(message_data),  # Thêm số lượng tin nhắn
                     "text_content": chat_data_text,
                     "embedding_type": "chat"
-                }
+                },
+                vector_name="default"
             )
             qdrant.upsert(collection_name=COLLECTIONS["chats"], points=[point])
             print(f"✅ Đã thêm embedding cho Chat ID {chat_id} với {len(message_data)} tin nhắn.")
@@ -314,8 +319,9 @@ def embed_and_upsert_to_qdrant(data: dict, text_content: str, topic: str):
         # Tạo point để lưu vào Qdrant
         point = PointStruct(
             id=data.get('id') or str(uuid.uuid4()),  # Sử dụng ID từ dữ liệu hoặc tạo mới
-            vector={"default": embedding},
-            payload=payload
+            vector=embedding,
+            payload=payload,
+            vector_name="default"
         )
 
         # Upsert vào Qdrant

@@ -5,12 +5,12 @@ from typing import Any, Dict, List, Optional
 
 import autogen
 from autogen import ConversableAgent
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from env import env
-from models.message import CreateMessagePayload
+from models.chats import ChatMessageCreate
 from repositories.message import MessageRepository
 from services.products import ProductServices
 from services.search import SearchServices
@@ -19,10 +19,11 @@ from embedding.main import COLLECTIONS
 from embedding.chatbot import retrieve_relevant_context, chat_completion_with_context
 from embedding.recommendation import get_text_based_recommendations, get_similar_products
 from services.chat import ChatService
-from models.chat import ChatCreate
+from models.chats import ChatCreate
 from repositories.chat import ChatRepository
 from repositories.customers import CustomerRepository
 from models.customers import CustomerCreate
+from services.qdrant import QdrantService
 
 client = genai.Client(api_key=env.GEMINI_API_KEY)
 
@@ -121,16 +122,10 @@ class QdrantAgent:
             human_input_mode="NEVER"
         )
 
-    def _extract_qdrant_query(response: str):
+    def _extract_qdrant_query(self, response: str):
+        default_query = {"collection_name": "products", "payload": "", "limit": 5}
         json_match = re.search(r'```json\s*(\{.*?\})\s*```', response, re.DOTALL) or \
                         re.search(r'(\{.*?\})', response, re.DOTALL)
-        if not json_match:
-            return {"collection_name": "products", "payload": "", "limit": 5}
-        try:
-            return json.loads(json_match.group(1))
-        except json.JSONDecodeError as e:
-            return {"collection_name": "products", "payload": "", "limit": 5}
-                     
         if not json_match:
             logger.warning(f"Không tìm thấy truy vấn Qdrant: {response}")
             return default_query
@@ -248,7 +243,13 @@ class QdrantAgent:
                 model="gemini-2.5-flash-preview-04-17",
                 contents=explanation_prompt,
             )
-            return response.text
+            if hasattr(response, 'text'):
+                return response.text
+            elif hasattr(response, 'candidates') and response.candidates:
+                return response.candidates[0].content.parts[0].text
+            else:
+                logger.error("Unexpected response format from Gemini API")
+                return "Xin lỗi, tôi không thể tạo câu trả lời chi tiết lúc này. Vui lòng thử lại sau."
             
         except Exception as e:
             logger.error(f"Lỗi khi tạo câu trả lời: {e}")
@@ -317,6 +318,9 @@ async def chatbot_endpoint(request: ChatbotRequest):
         content = await qdrant_agent.process_query(request.message, request.chat_id)
         execution_time = time.time() - start_time
         
+        if not content:
+            content = "Xin lỗi, tôi không thể xử lý yêu cầu của bạn lúc này. Vui lòng thử lại sau."
+        
         return AgentResponse(
             content=content,
             status="success",
@@ -324,4 +328,24 @@ async def chatbot_endpoint(request: ChatbotRequest):
         )
     except Exception as e:
         logger.error(f"Lỗi tại endpoint chatbot: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Lỗi xử lý: {str(e)}")
+        return AgentResponse(
+            content="Xin lỗi, đã xảy ra lỗi khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+            status="error",
+            execution_time=time.time() - start_time
+        )
+
+@router.post("/search", response_model=list[dict])
+def search_products(query: str, limit: int = 5):
+    try:
+        results = QdrantService.search_products(query, limit)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@router.post("/chat", response_model=dict)
+def chat_with_qdrant(payload: ChatMessageCreate):
+    try:
+        response = QdrantService.process_message(payload)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

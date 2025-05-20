@@ -1,44 +1,38 @@
 from db import Session
-from models.chat import Chat, ChatCreate, UpdateChatPayload, ChatModel
-from models.message import Message
+from models.chats import Chat, ChatCreate, ChatResponse, ChatMessage
 
 
 class ChatRepository:
     @staticmethod
-    def create(payload: ChatCreate) -> ChatModel:
+    def create(payload: ChatCreate) -> ChatResponse:
         with Session() as session:
-            # Đếm số lượng session đã có của user_id này
-            existing_count = session.query(Chat).filter(Chat.user_id == payload.user_id).count()
-            next_session_id = existing_count + 1
-
-            # Tạo bản ghi mới với session_id
-            chat = Chat(**payload.model_dump(), session_id=next_session_id)
+            chat = Chat(**payload.model_dump())
             session.add(chat)
             session.commit()
             session.refresh(chat)
-            return ChatModel.model_validate(chat)
+            return ChatResponse.model_validate(chat)
 
     @staticmethod
-    def get_one(chat_id: int) -> ChatModel:
+    def get_one(chat_id: int) -> ChatResponse:
         with Session() as session:
             chat = session.get(Chat, chat_id)
-            return ChatModel.model_validate(chat)
+            return ChatResponse.model_validate(chat)
 
     @staticmethod
-    def update(chat_id: int, data: UpdateChatPayload) -> ChatModel:
+    def update(chat_id: int, data: dict) -> ChatResponse:
         with Session() as session:
             chat = session.get(Chat, chat_id)
-            for field, value in data.model_dump(exclude_unset=True).items():
+            for field, value in data.items():
                 setattr(chat, field, value)
             session.commit()
             session.refresh(chat)
-            return ChatModel.model_validate(chat)
+            return ChatResponse.model_validate(chat)
 
     @staticmethod
     def delete(chat_id: int):
         with Session() as session:
             # Xóa tất cả message liên quan trước
-            session.query(Message).filter(Message.chat_id == chat_id).delete()
+            session.query(ChatMessage).filter(ChatMessage.chat_id == chat_id).delete()
 
             # Sau đó xóa chat
             chat = session.get(Chat, chat_id)
@@ -48,7 +42,7 @@ class ChatRepository:
             session.commit()
 
     @staticmethod
-    def get_chat_by_user_id(user_id: int) -> list[ChatModel]:
+    def get_chat_by_user_id(user_id: int) -> list[ChatResponse]:
         with Session() as session:
-            chats = session.query(Chat).filter(Chat.user_id == user_id).all()
-            return [ChatModel.model_validate(chat) for chat in chats]
+            chats = session.query(Chat).filter(Chat.customer_id == user_id).all()
+            return [ChatResponse.model_validate(chat) for chat in chats]

@@ -5,7 +5,7 @@ from .base import config_list, ShopRequest
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from db import Session, get_db
-from models.shop import Shop
+from models.shops import Shop
 from repositories.policies import PolicyRepository
 from datetime import datetime
 

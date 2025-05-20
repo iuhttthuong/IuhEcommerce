@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from sqlalchemy import ForeignKey, DECIMAL, TIMESTAMP
-from sqlalchemy.orm import Mapped, mapped_column
-from pydantic import BaseModel
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pydantic import BaseModel, Field
 from models.base import Base, TimestampMixin
 
 
@@ -31,87 +31,57 @@ class Product(Base, TimestampMixin):
     shippable: Mapped[bool] = mapped_column(nullable=True)
     availability: Mapped[bool] = mapped_column(nullable=True)
 
-class ProductCreate(BaseModel):
-    product_id: int
-    name: str
-    product_short_url: str
-    description: str
-    short_description: str
-    price: float
-    original_price: float
-    discount: float
-    discount_rate: int
-    sku: str
-    review_text: str
-    quantity_sold: int
-    rating_average: float
-    review_count: int
-    order_count: int
-    favourite_count: int
-    thumbnail_url: str
-    category_id: str
-    brand_id: int
-    seller_id: int
-    shippable: bool
-    availability: bool
+    # Relationships
+    category: Mapped["Category"] = relationship("Category", back_populates="products")
+    brand: Mapped["Brand"] = relationship("Brand", back_populates="products")
+    shop: Mapped["Shop"] = relationship("Shop", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Shop.shop_id")
+    seller: Mapped["Seller"] = relationship("Seller", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Seller.seller_id")
+    images: Mapped[List["ProductImage"]] = relationship("ProductImage", back_populates="product")
+    warranties: Mapped[List["Warranty"]] = relationship("Warranty", back_populates="product")
+    inventory: Mapped["Inventory"] = relationship("Inventory", back_populates="product")
+    discounts: Mapped[List["Discount"]] = relationship("Discount", secondary="product_discounts", back_populates="products", overlaps="product_discounts")
+    order_items: Mapped[List["OrderItem"]] = relationship("OrderItem", back_populates="product")
+    promotions: Mapped[List["Promotion"]] = relationship("Promotion", back_populates="product")
 
-    class Config:
-        from_attributes = True
-        validate_by_name = True
-        use_enum_values = True
-
-class ProductModel(BaseModel):
-    product_id: int
-    name: str
-    product_short_url: str
-    description: str
-    short_description: str
-    price: float
-    original_price: float
-    discount: float
-    discount_rate: int
-    sku: str
-    review_text: str
-    quantity_sold: int
-    rating_average: float
-    review_count: int
-    order_count: int
-    favourite_count: int
-    thumbnail_url: str
-    category_id: str
-    brand_id: int
-    seller_id: int
-    shippable: bool
-    availability: bool
-
-    class Config:
-        from_attributes = True
-        validate_by_name = True
-        use_enum_values = True
-
-class ProductResponse(BaseModel):
-    product_id: int
-    name: str
-    product_short_url: str
-    description: str
-    short_description: str
-    price: float
-    original_price: float
-    discount: float
-    discount_rate: int
-    sku: str
-    review_text: str
-    quantity_sold: int
-    rating_average: float
-    review_count: int
-    order_count: int
-    favourite_count: int
-    thumbnail_url: str
-    category_id: str
+class ProductBase(BaseModel):
+    name: Optional[str] = None
+    product_short_url: Optional[str] = None
+    description: Optional[str] = None
+    short_description: Optional[str] = None
+    price: Optional[float] = None
+    original_price: Optional[float] = None
+    discount: Optional[float] = None
+    discount_rate: Optional[int] = None
+    sku: Optional[str] = None
+    review_text: Optional[str] = None
+    quantity_sold: Optional[int] = None
+    rating_average: Optional[float] = None
+    review_count: Optional[int] = None
+    order_count: Optional[int] = None
+    favourite_count: Optional[int] = None
+    thumbnail_url: Optional[str] = None
+    category_id: Optional[str] = None
     brand_id: Optional[int] = None
-    seller_id: int
-    shippable: bool
-    availability: bool
+    seller_id: Optional[int] = None
+    shippable: Optional[bool] = None
+    availability: Optional[bool] = None
+
+    class Config:
+        from_attributes = True
+        validate_by_name = True
+        use_enum_values = True
+
+class ProductCreate(ProductBase):
+    product_id: int
+
+class ProductUpdate(ProductBase):
+    pass
+
+class ProductModel(ProductBase):
+    product_id: int
+
+class ProductResponse(ProductBase):
+    product_id: int
     created_at: datetime
     updated_at: datetime
 

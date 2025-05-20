@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 import time
 
 from env import env
-from models.message import CreateMessagePayload
+from models.chats import ChatMessageCreate
 from repositories.message import MessageRepository
 
 router = APIRouter(prefix="/orchestrator", tags=["Orchestrator"])
@@ -615,9 +615,10 @@ class OrchestratorAgent:
             # Save interaction data to message repository if needed
             try:
                 message_repository = MessageRepository()
-                message_payload = CreateMessagePayload(
+                message_payload = ChatMessageCreate(
                     chat_id=request.chat_id,
-                    role="assistant",
+                    sender_type="assistant",
+                    sender_id=0,  # You may need to adjust this based on your requirements
                     content=content,
                     metadata={
                         "intent": final_intent,
@@ -646,9 +647,10 @@ class OrchestratorAgent:
             # Try to log error message
             try:
                 message_repository = MessageRepository()
-                message_payload = CreateMessagePayload(
+                message_payload = ChatMessageCreate(
                     chat_id=request.chat_id,
-                    role="assistant",
+                    sender_type="assistant",
+                    sender_id=0,  # You may need to adjust this based on your requirements
                     content=error_response["content"],
                     metadata={"error": str(e)}
                 )

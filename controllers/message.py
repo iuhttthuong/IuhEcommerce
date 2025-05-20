@@ -1,16 +1,16 @@
 from fastapi import APIRouter, HTTPException, status
-from models.message import CreateMessagePayload, UpdateMessagePayload, MessageModel
+from models.chats import ChatMessageCreate, ChatMessageResponse, UpdateMessagePayload
 from services.message import MessageService
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
 
-@router.post("/", response_model=MessageModel, status_code=status.HTTP_201_CREATED)
-def create_message(payload: CreateMessagePayload):
+@router.post("/", response_model=ChatMessageResponse, status_code=status.HTTP_201_CREATED)
+def create_message(payload: ChatMessageCreate):
     return MessageService.create_message(payload)
 
 
-@router.get("/{message_id}", response_model=MessageModel)
+@router.get("/{message_id}", response_model=ChatMessageResponse)
 def get_message(message_id: int):
     try:
         message = MessageService.get_message(message_id)
@@ -19,7 +19,7 @@ def get_message(message_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
 
-@router.put("/{message_id}", response_model=MessageModel)
+@router.put("/{message_id}", response_model=ChatMessageResponse)
 def update_message(message_id: int, payload: UpdateMessagePayload):
     try:
         message = MessageService.update_message(message_id, payload)
@@ -37,13 +37,13 @@ def delete_message(message_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
 
 
-@router.get("/recent/{chat_id}", response_model=list[MessageModel])
+@router.get("/recent/{chat_id}", response_model=list[ChatMessageResponse])
 def get_recent_messages(chat_id: int, limit: int = 5):
     messages = MessageService.get_recent_messages(chat_id, limit)
     return messages
 
 
-@router.get("/all/{chat_id}", response_model=list[MessageModel])
+@router.get("/all/{chat_id}", response_model=list[ChatMessageResponse])
 def get_all_messages_in_chat(chat_id: int):
     messages = MessageService.get_all_messages_in_chat(chat_id)
     return messages

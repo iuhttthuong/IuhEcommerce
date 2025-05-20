@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 import os, json, dotenv
 from autogen import AssistantAgent, ConversableAgent
@@ -8,9 +8,10 @@ from models.fqas import FQA
 from repositories.message import MessageRepository
 from controllers.search import search
 import traceback
-from models.message import MessageModel, CreateMessagePayload
+from models.chats import ChatMessageCreate
 from autogen import register_function
 from env import env
+from services.policy import PolicyService
 
 # Lấy cấu hình model từ môi trường
 config_list = [
@@ -69,9 +70,10 @@ def ask_chatbot(request: ChatbotRequest):
 
         # Lưu tin nhắn vào cơ sở dữ liệu
         message_repository = MessageRepository()
-        message_payload = CreateMessagePayload(
+        message_payload = ChatMessageCreate(
             chat_id=request.chat_id,
-            role="user",
+            sender_type="user",
+            sender_id=0,  # You may need to adjust this based on your requirements
             content=message
         )
         message_repository.create(message_payload)
@@ -96,9 +98,10 @@ def ask_chatbot(request: ChatbotRequest):
         )
         print(f"Response from assistant: {chat_result.summary}")
         # Lưu phản hồi vào cơ sở dữ liệu
-        response_payload = CreateMessagePayload(
+        response_payload = ChatMessageCreate(
             chat_id=request.chat_id,
-            role="assistant",
+            sender_type="assistant",
+            sender_id=0,  # You may need to adjust this based on your requirements
             content=chat_result.summary
         )
         message_repository.create(response_payload)
@@ -109,6 +112,14 @@ def ask_chatbot(request: ChatbotRequest):
         print(f"Error: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Đã xảy ra lỗi khi xử lý yêu cầu")
+
+@router.post("/policy", response_model=dict)
+def chat_with_policy(payload: ChatMessageCreate):
+    try:
+        response = PolicyService.process_message(payload)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 

@@ -8,7 +8,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from env import env
-from models.message import CreateMessagePayload
+from models.chats import ChatMessageCreate
 from repositories.message import MessageRepository
 
 router = APIRouter(prefix="/user-profile", tags=["User Profile"])
@@ -200,7 +200,7 @@ class UserProfileAgent:
             
             # Lưu thông tin tương tác vào message repository
             message_repository = MessageRepository()
-            response_payload = CreateMessagePayload(
+            response_payload = ChatMessageCreate(
                 chat_id=request.chat_id,
                 role="assistant",
                 content=response_content,

@@ -4,7 +4,7 @@ from sqlalchemy import func, desc
 from datetime import datetime, timedelta
 from fastapi import HTTPException
 from .chat_models import ChatMessage, ChatHistory, ChatSummary, ChatAnalytics
-from models.chat import Chat, ChatCreate, UpdateChatPayload, ChatModel
+from models.chats import Chat, ChatCreate, UpdateChatPayload, ChatModel, ChatResponse
 
 class ChatRepository:
     def __init__(self, db: Session):

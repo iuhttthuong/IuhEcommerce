@@ -5,6 +5,7 @@ from datetime import datetime
 from autogen import AssistantAgent, ConversableAgent
 from env import env
 import json
+from .base import ShopChatRequest, ShopChatResponse, process_shop_chat
 
 router = APIRouter(prefix="/shop/chat", tags=["Shop Chat"])
 
@@ -16,42 +17,6 @@ config_list = [
         "api_type": "google"
     }
 ]
-
-class ShopChatRequest(BaseModel):
-    shop_id: int
-    message: str
-    user_id: Optional[int] = None
-    context: Optional[Dict[str, Any]] = None
-
-class ShopChatResponse(BaseModel):
-    response: str
-    agent: str
-    timestamp: datetime = datetime.now()
-    context: Optional[Dict[str, Any]] = None
-
-# Shop Chat Manager Agent
-ShopChatManager = ConversableAgent(
-    name="shop_chat_manager",
-    system_message="""Bạn là một trợ lý AI thông minh làm việc cho sàn thương mại điện tử IUH-Ecomerce
-    Bạn sẽ nhận đầu vào câu hỏi của người bán hàng về quản lý shop trên sàn
-    Nhiệm vụ của bạn là phân tích câu hỏi và điều hướng đến agent phù hợp để xử lý
-    Hãy trả về mô tả truy vấn dưới dạng JSON:
-    {
-        "agent": "ProductManagementAgent" | "InventoryAgent" | "OrderAgent" | "MarketingAgent" | 
-                "AnalyticsAgent" | "FinanceAgent" | "PolicyAgent" | "CustomerServiceAgent",
-        "query": String,
-        "intent": String,
-        "entities": Dict
-    }
-    Với:
-    - agent: Tên của agent phù hợp để xử lý câu hỏi
-    - query: Câu hỏi cần xử lý
-    - intent: Ý định của người dùng (ví dụ: "check_inventory", "update_product", "view_orders")
-    - entities: Các thực thể được trích xuất từ câu hỏi (ví dụ: product_id, order_id)
-    """,
-    llm_config={"config_list": config_list},
-    human_input_mode="NEVER"
-)
 
 # Specialized Shop Agents
 class ProductManagementAgent(ConversableAgent):
@@ -103,51 +68,6 @@ class OrderAgent(ConversableAgent):
 product_agent = ProductManagementAgent()
 inventory_agent = InventoryAgent()
 order_agent = OrderAgent()
-
-async def process_shop_chat(request: ShopChatRequest) -> ShopChatResponse:
-    try:
-        # Get initial analysis from manager
-        manager_response = await ShopChatManager.a_generate_reply(
-            messages=[{"role": "user", "content": request.message}]
-        )
-        analysis = json.loads(manager_response)
-        
-        # Route to appropriate agent
-        agent = analysis["agent"]
-        query = analysis["query"]
-        
-        if agent == "ProductManagementAgent":
-            response = await product_agent.a_generate_reply(
-                messages=[{"role": "user", "content": query}]
-            )
-        elif agent == "InventoryAgent":
-            response = await inventory_agent.a_generate_reply(
-                messages=[{"role": "user", "content": query}]
-            )
-        elif agent == "OrderAgent":
-            response = await order_agent.a_generate_reply(
-                messages=[{"role": "user", "content": query}]
-            )
-        else:
-            # Default to manager if no specific agent matches
-            response = await ShopChatManager.a_generate_reply(
-                messages=[{"role": "user", "content": query}]
-            )
-        
-        return ShopChatResponse(
-            response=response,
-            agent=agent,
-            context={
-                "intent": analysis.get("intent"),
-                "entities": analysis.get("entities", {})
-            }
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing chat request: {str(e)}"
-        )
 
 @router.post("/ask", response_model=ShopChatResponse)
 async def ask_shop_chat(request: ShopChatRequest):

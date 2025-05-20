@@ -1,100 +1,105 @@
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
-from database import get_db
+from db import get_db
 from services.chat import ChatService
-from models.chat import (
-    ChatSessionCreate, ChatSessionUpdate,
-    ChatMessageCreate, ChatHistoryResponse,
-    ChatSessionResponse, ChatMessageResponse
+from models.chats import (
+    ChatCreate,
+    ChatMessageCreate,
+    ChatResponse,
+    ChatMessageResponse
 )
-from shop.chat_models import ShopChatSession, ShopChatSessionCreate, ShopChatSessionUpdate, ShopChatSessionResponse
+from shop_chat.base import ShopChatResponse, ShopChatRequest, process_shop_chat
 
-router = APIRouter(prefix="/api/shop/chat", tags=["shop_chat"])
+router = APIRouter(
+    prefix="/api/shop-chat",
+    tags=["shop-chat"]
+)
 
-@router.post("/sessions", response_model=ShopChatSessionResponse)
-def create_chat_session(
-    data: ShopChatSessionCreate,
-    db: Session = Depends(get_db)
-):
-    """Create a new chat session for a shop."""
-    chat_service = ChatService(db)
-    return chat_service.create_session(data)
-
-@router.get("/sessions/{session_id}", response_model=ShopChatSessionResponse)
-def get_chat_session(
-    session_id: int,
-    db: Session = Depends(get_db)
-):
-    """Get a specific chat session."""
-    chat_service = ChatService(db)
-    session = chat_service.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return session
-
-@router.put("/sessions/{session_id}", response_model=ShopChatSessionResponse)
-def update_chat_session(
-    session_id: int,
-    data: ShopChatSessionUpdate,
-    db: Session = Depends(get_db)
-):
-    """Update a chat session."""
-    chat_service = ChatService(db)
-    return chat_service.update_session(session_id, data)
-
-@router.post("/messages", response_model=ChatMessageResponse)
-def add_message(
-    data: ChatMessageCreate,
-    db: Session = Depends(get_db)
-):
-    """Add a new message to a chat session."""
-    chat_service = ChatService(db)
-    return chat_service.add_message(data)
-
-@router.get("/sessions/{session_id}/history", response_model=ChatHistoryResponse)
-def get_chat_history(
-    session_id: int,
-    limit: int = 50,
-    db: Session = Depends(get_db)
-):
-    """Get chat history for a session."""
-    chat_service = ChatService(db)
-    return chat_service.get_chat_history(session_id, limit)
-
-@router.get("/shops/{shop_id}/active-sessions", response_model=List[ShopChatSessionResponse])
-def get_active_sessions(
+@router.post("/sessions", response_model=ChatResponse)
+async def create_session(
     shop_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get all active chat sessions for a shop."""
-    chat_service = ChatService(db)
-    return chat_service.get_active_sessions(shop_id)
+    """Create a new chat session"""
+    service = ChatService(db)
+    return service.create_session(ChatCreate(shop_id=shop_id))
 
-@router.post("/sessions/{session_id}/close", response_model=ShopChatSessionResponse)
-def close_chat_session(
+@router.post("/sessions/{session_id}/messages", response_model=ShopChatResponse)
+async def process_message(
     session_id: int,
-    db: Session = Depends(get_db)
-):
-    """Close a chat session."""
-    chat_service = ChatService(db)
-    return chat_service.close_session(session_id)
-
-@router.get("/sessions/{session_id}/summary", response_model=Dict[str, Any])
-def get_session_summary(
-    session_id: int,
-    db: Session = Depends(get_db)
-):
-    """Get a summary of a chat session."""
-    chat_service = ChatService(db)
-    return chat_service.get_session_summary(session_id)
-
-@router.get("/shops/{shop_id}/analytics", response_model=Dict[str, Any])
-def get_shop_chat_analytics(
+    message: str,
     shop_id: int,
-    days: int = 30,
     db: Session = Depends(get_db)
 ):
-    """Get chat analytics for a shop."""
-    chat_service = ChatService(db)
-    return chat_service.get_shop_chat_analytics(shop_id, days) 
+    """Process a new message in a chat session"""
+    service = ChatService(db)
+    try:
+        # Add message to chat
+        service.add_message(ChatMessageCreate(
+            chat_id=session_id,
+            sender_type="shop",
+            sender_id=shop_id,
+            content=message
+        ))
+        
+        # Get chat history
+        messages = service.get_messages(session_id)
+        
+        # Process with shop chat
+        shop_request = ShopChatRequest(
+            shop_id=shop_id,
+            message=message,
+            user_id=None,
+            context={}
+        )
+        
+        # Process using shop chat
+        response = await process_shop_chat(shop_request)
+        
+        # Save the response to chat history
+        service.add_message(ChatMessageCreate(
+            chat_id=session_id,
+            sender_type="shop",
+            sender_id=shop_id,
+            content=response.response
+        ))
+        
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.get("/sessions/{session_id}/history", response_model=List[ChatMessageResponse])
+async def get_chat_history(
+    session_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get chat history for a session"""
+    service = ChatService(db)
+    try:
+        return service.get_messages(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.get("/shops/{shop_id}/history", response_model=List[ChatResponse])
+async def get_shop_history(
+    shop_id: int,
+    limit: Optional[int] = 10,
+    db: Session = Depends(get_db)
+):
+    """Get recent chat history for a shop"""
+    service = ChatService(db)
+    return service.get_chat_by_shop_id(shop_id)[:limit]
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: int,
+    db: Session = Depends(get_db)
+):
+    """Delete a chat session"""
+    service = ChatService(db)
+    try:
+        service.close_session(session_id)
+        return {"message": "Chat session closed successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from db import Session, get_db
-from models.shop import Shop
+from models.shops import Shop
 from loguru import logger
 from autogen import AssistantAgent, ConversableAgent
 from env import env

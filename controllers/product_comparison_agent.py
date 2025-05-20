@@ -8,7 +8,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from env import env
-from models.message import CreateMessagePayload
+from models.chats import ChatMessageCreate
 from repositories.message import MessageRepository
 from services.products import ProductServices
 from services.search import SearchServices
@@ -381,13 +381,15 @@ class ProductComparisonAgent:
             
             # Lưu thông tin tương tác vào message repository
             message_repository = MessageRepository()
-            response_payload = CreateMessagePayload(
+            response_payload = ChatMessageCreate(
                 chat_id=request.chat_id,
-                role="assistant",
+                sender_type="assistant",
+                sender_id=0,  # You may need to adjust this based on your requirements
                 content=response_content,
                 metadata={
-                    "product_count": len(products),
-                    "product_ids": [p.get("id") for p in products]
+                    "intent": "compare_products",
+                    "entities": request.entities,
+                    "confidence": 0.8  # Assuming a default confidence
                 }
             )
             message_repository.create(response_payload)
