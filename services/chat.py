@@ -19,7 +19,7 @@ class ChatService:
         # Create new chat session
         chat = Chat(
             shop_id=data.shop_id,
-            customer_id=data.customer_id,
+            customer_id=None if not data.customer_id or data.customer_id == 0 else data.customer_id,
             status="active",
             last_message_at=datetime.utcnow()
         )

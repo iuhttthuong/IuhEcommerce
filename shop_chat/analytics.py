@@ -1,21 +1,21 @@
 from fastapi import HTTPException, APIRouter
 from autogen import AssistantAgent
 from loguru import logger
-from .base import config_list, ShopRequest
+from .base import config_list, ShopChatRequest, ShopChatResponse, BaseShopAgent
 from repositories.analytics import AnalyticsRepository
 from datetime import datetime, timedelta
 import json
 from typing import Dict, Any, Optional
-from .base import BaseShopAgent, ShopAgentRequest, ShopAgentResponse
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/shop/analytics", tags=["Shop Analytics"])
 
 class AnalyticsAgent(BaseShopAgent):
-    def __init__(self, shop_id: int):
-        super().__init__(shop_id, "analytics")
-        self.analytics_repository = AnalyticsRepository()
+    def __init__(self, shop_id: int, db: Session):
+        super().__init__(shop_id)
+        self.analytics_repository = AnalyticsRepository(db)
 
-    async def process(self, request: ShopAgentRequest) -> ShopAgentResponse:
+    async def process(self, request: ShopChatRequest) -> ShopChatResponse:
         message = request.message.lower()
         
         if "doanh số" in message or "doanh thu" in message:
@@ -40,13 +40,12 @@ class AnalyticsAgent(BaseShopAgent):
                 "Bạn muốn xem phân tích nào?"
             )
 
-    async def _handle_sales_analytics(self, request: ShopAgentRequest) -> ShopAgentResponse:
+    async def _handle_sales_analytics(self, request: ShopChatRequest) -> ShopChatResponse:
         # Default to last 30 days if no date range specified
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
         summary = self.analytics_repository.get_analytics_summary(
-            self.db,
             self.shop_id,
             start_date,
             end_date
@@ -67,12 +66,11 @@ class AnalyticsAgent(BaseShopAgent):
         
         return self._create_response(response)
 
-    async def _handle_product_analytics(self, request: ShopAgentRequest) -> ShopAgentResponse:
+    async def _handle_product_analytics(self, request: ShopChatRequest) -> ShopChatResponse:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
         summary = self.analytics_repository.get_analytics_summary(
-            self.db,
             self.shop_id,
             start_date,
             end_date
@@ -100,12 +98,11 @@ class AnalyticsAgent(BaseShopAgent):
         
         return self._create_response(response)
 
-    async def _handle_customer_analytics(self, request: ShopAgentRequest) -> ShopAgentResponse:
+    async def _handle_customer_analytics(self, request: ShopChatRequest) -> ShopChatResponse:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
         summary = self.analytics_repository.get_analytics_summary(
-            self.db,
             self.shop_id,
             start_date,
             end_date
@@ -125,12 +122,11 @@ class AnalyticsAgent(BaseShopAgent):
         
         return self._create_response(response)
 
-    async def _handle_marketing_analytics(self, request: ShopAgentRequest) -> ShopAgentResponse:
+    async def _handle_marketing_analytics(self, request: ShopChatRequest) -> ShopChatResponse:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
         summary = self.analytics_repository.get_analytics_summary(
-            self.db,
             self.shop_id,
             start_date,
             end_date
@@ -155,12 +151,11 @@ class AnalyticsAgent(BaseShopAgent):
         
         return self._create_response(response)
 
-    async def _handle_overview_analytics(self, request: ShopAgentRequest) -> ShopAgentResponse:
+    async def _handle_overview_analytics(self, request: ShopChatRequest) -> ShopChatResponse:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         
         summary = self.analytics_repository.get_analytics_summary(
-            self.db,
             self.shop_id,
             start_date,
             end_date
@@ -201,8 +196,27 @@ class AnalyticsAgent(BaseShopAgent):
         
         return self._create_response(response)
 
+class Analytics:
+    def __init__(self, db: Session):
+        self.db = db
+        self.agent = AnalyticsAgent(shop_id=1, db=db)  # Pass db to AnalyticsAgent
+        self.analytics_repository = AnalyticsRepository(db)
+
+    async def get_analytics(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Get analytics data"""
+        try:
+            response = await self.agent.process_request(ShopChatRequest(**request))
+            return response.dict()
+        except Exception as e:
+            logger.error(f"Error processing request: {str(e)}")
+            return {
+                "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error",
+                "error": str(e)
+            }
+
 # Add router endpoints
 @router.get("/")
 async def get_shop_analytics():
-    """Get shop analytics data"""
-    return {"message": "Get analytics endpoint"} 
+    """Get shop analytics"""
+    return {"message": "Get shop analytics endpoint"} 

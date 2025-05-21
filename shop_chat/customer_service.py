@@ -1,36 +1,21 @@
 from fastapi import HTTPException, APIRouter
 from autogen import AssistantAgent
 from loguru import logger
-from .base import config_list, ShopRequest
+from .base import config_list, ShopChatRequest, ShopChatResponse, BaseShopAgent
 from repositories.customer_service import CustomerServiceRepository
 from datetime import datetime
+import json
+from typing import Dict, Any
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/shop/customer-service", tags=["Shop Customer Service"])
 
-class CustomerServiceAgent:
-    def __init__(self):
-        self.agent = AssistantAgent(
-            name="customer_service_agent",
-            system_message="""Bạn là một trợ lý AI chuyên về dịch vụ khách hàng cho shop trên sàn thương mại điện tử IUH-Ecomerce.
-            Nhiệm vụ của bạn là:
-            1. Trả lời câu hỏi của khách hàng
-            2. Hỗ trợ giải quyết vấn đề
-            3. Xử lý phản hồi và đánh giá
-            4. Tư vấn sản phẩm
-            5. Hỗ trợ đơn hàng
-            
-            Bạn cần đảm bảo:
-            - Phản hồi nhanh chóng và chính xác
-            - Thái độ thân thiện và chuyên nghiệp
-            - Giải quyết triệt để vấn đề
-            - Duy trì chất lượng dịch vụ
-            """,
-            llm_config={"config_list": config_list},
-            human_input_mode="NEVER"
-        )
-        self.customer_service_repository = CustomerServiceRepository()
+class CustomerServiceAgent(BaseShopAgent):
+    def __init__(self, shop_id: int, db: Session):
+        super().__init__(shop_id)
+        self.customer_service_repository = CustomerServiceRepository(db)
 
-    async def process_request(self, request: ShopRequest):
+    async def process(self, request: ShopChatRequest) -> ShopChatResponse:
         try:
             # Get response from agent
             response = await self.agent.a_generate_reply(
@@ -42,19 +27,24 @@ class CustomerServiceAgent:
             
             # Execute the appropriate action
             if action["type"] == "inquiry":
-                return await self._handle_inquiry(action["data"], request.shop_id)
+                result = await self._handle_inquiry(action["data"], self.shop_id)
             elif action["type"] == "support":
-                return await self._handle_support(action["data"], request.shop_id)
+                result = await self._handle_support(action["data"], self.shop_id)
             elif action["type"] == "feedback":
-                return await self._handle_feedback(action["data"], request.shop_id)
+                result = await self._handle_feedback(action["data"], self.shop_id)
             elif action["type"] == "product_advice":
-                return await self._provide_product_advice(action["data"], request.shop_id)
+                result = await self._provide_product_advice(action["data"], self.shop_id)
             else:
-                return {"message": "Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."}
+                result = {"message": "Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."}
+            
+            return self._create_response(result.get("message", str(result)))
                 
         except Exception as e:
             logger.error(f"Error in CustomerServiceAgent: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+            return self._create_response(
+                "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                error=str(e)
+            )
 
     def _parse_action(self, response):
         try:
@@ -160,6 +150,71 @@ class CustomerServiceAgent:
         except Exception as e:
             logger.error(f"Error providing product advice: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
+
+class CustomerService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.agent = CustomerServiceAgent(shop_id=1, db=db)  # Pass db to CustomerServiceAgent
+        self.customer_service_repository = CustomerServiceRepository(db)
+
+    async def create_customer(self, customer_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new customer"""
+        try:
+            customer = await self.customer_service_repository.create_customer(customer_data)
+            return customer
+        except Exception as e:
+            logger.error(f"Error creating customer: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_customer(self, customer_id: int) -> Dict[str, Any]:
+        """Get customer details"""
+        try:
+            customer = await self.customer_service_repository.get_customer(customer_id)
+            if not customer:
+                raise HTTPException(status_code=404, detail="Customer not found")
+            return customer
+        except Exception as e:
+            logger.error(f"Error getting customer: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def update_customer(self, customer_id: int, customer_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update customer information"""
+        try:
+            updated_customer = await self.customer_service_repository.update_customer(customer_id, customer_data)
+            return updated_customer
+        except Exception as e:
+            logger.error(f"Error updating customer: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def delete_customer(self, customer_id: int) -> Dict[str, Any]:
+        """Delete a customer"""
+        try:
+            await self.customer_service_repository.delete_customer(customer_id)
+            return {"message": "Customer deleted successfully"}
+        except Exception as e:
+            logger.error(f"Error deleting customer: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_total_customers(self) -> int:
+        """Get total number of customers"""
+        try:
+            return await self.customer_service_repository.get_total_customers()
+        except Exception as e:
+            logger.error(f"Error getting total customers: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a customer service request"""
+        try:
+            response = await self.agent.process_request(ShopChatRequest(**request))
+            return response.dict()
+        except Exception as e:
+            logger.error(f"Error processing request: {str(e)}")
+            return {
+                "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error",
+                "error": str(e)
+            }
 
 # Add router endpoints
 @router.get("/")

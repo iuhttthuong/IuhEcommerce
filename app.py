@@ -28,6 +28,7 @@ from controllers import (discounts,
 )
 from controllers.shops import router as shop_controller
 from routers.shop_chat import router as shop_chat_router
+from routers.shop import router as shop_router
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -65,6 +66,7 @@ app.include_router(product_discounts.router, prefix="/api/product-discounts", ta
 # Shop related endpoints
 app.include_router(shops.router, prefix="/api/shops", tags=["Shops"])
 app.include_router(shop_chat_router, prefix="/api/shop/chat", tags=["Shop Chat"])
+app.include_router(shop_router, prefix="/api/shop", tags=["Shop Management"])
 
 # FAQ and Policy endpoints
 app.include_router(faq_loader.router, prefix="/api/faq-loader", tags=["FAQ Loader"])

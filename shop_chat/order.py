@@ -1,14 +1,17 @@
-from fastapi import HTTPException, APIRouter
+from fastapi import HTTPException, APIRouter, Depends
 from autogen import AssistantAgent
 from loguru import logger
-from .base import config_list, ShopRequest
+from .base import config_list, ShopChatRequest
 from repositories.orders import OrderRepository
 from models.orders import OrderUpdate, OrderStatus
+from db import get_db
+from sqlalchemy.orm import Session
+import json
 
 router = APIRouter(prefix="/shop/orders", tags=["Shop Orders"])
 
 class OrderAgent:
-    def __init__(self):
+    def __init__(self, db: Session):
         self.agent = AssistantAgent(
             name="order_management_agent",
             system_message="""Bạn là một trợ lý AI chuyên về quản lý đơn hàng cho shop trên sàn thương mại điện tử IUH-Ecomerce.
@@ -28,9 +31,9 @@ class OrderAgent:
             llm_config={"config_list": config_list},
             human_input_mode="NEVER"
         )
-        self.order_repository = OrderRepository()
+        self.order_repository = OrderRepository(db)
 
-    async def process_request(self, request: ShopRequest):
+    async def process_request(self, request: ShopChatRequest):
         try:
             # Get response from agent
             response = await self.agent.a_generate_reply(
@@ -165,6 +168,62 @@ class OrderAgent:
         except Exception as e:
             logger.error(f"Error printing shipping label: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
+
+class Order:
+    def __init__(self, db: Session = Depends(get_db)):
+        self.agent = OrderAgent(db)
+        self.order_repository = OrderRepository(db)
+
+    async def create_order(self, order_data: dict) -> dict:
+        """Create a new order"""
+        try:
+            order = await self.order_repository.create(order_data)
+            return order
+        except Exception as e:
+            logger.error(f"Error creating order: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_order(self, order_id: int) -> dict:
+        """Get order details"""
+        try:
+            order = await self.order_repository.get_by_id(order_id)
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
+            return order
+        except Exception as e:
+            logger.error(f"Error getting order: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def update_order_status(self, order_id: int, status: OrderStatus) -> dict:
+        """Update order status"""
+        try:
+            update_data = OrderUpdate(status=status)
+            updated_order = await self.order_repository.update(order_id, update_data)
+            return updated_order
+        except Exception as e:
+            logger.error(f"Error updating order status: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_total_orders(self) -> int:
+        """Get total number of orders"""
+        try:
+            return await self.order_repository.count()
+        except Exception as e:
+            logger.error(f"Error getting total orders: {str(e)}")
+            return 0
+
+    async def process_request(self, request: dict) -> dict:
+        """Process an order management request"""
+        try:
+            response = await self.agent.process_request(ShopChatRequest(**request))
+            return response
+        except Exception as e:
+            logger.error(f"Error processing request: {str(e)}")
+            return {
+                "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error",
+                "error": str(e)
+            }
 
 # Add router endpoints
 @router.get("/")

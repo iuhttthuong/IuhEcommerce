@@ -1,0 +1,1 @@
+docker exec -i postgres psql -U E_commerce_chatbot -d E_commerce_chatbot -c "DROP TABLE IF EXISTS alembic_version;"

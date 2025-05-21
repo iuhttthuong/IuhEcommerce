@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import ForeignKey, String
+from typing import Optional, List, Dict, Any
+from sqlalchemy import ForeignKey, String, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pydantic import BaseModel
 from models.base import Base, TimestampMixin
@@ -14,6 +14,7 @@ class Chat(Base, TimestampMixin):
     customer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customers.customer_id"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active, closed
     last_message_at: Mapped[datetime] = mapped_column(nullable=False)
+    context: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     
     # Relationships
     shop = relationship("Shop", back_populates="chat_sessions")

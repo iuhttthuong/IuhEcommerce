@@ -5,11 +5,13 @@ from .base import config_list, BaseShopAgent, ShopChatRequest, ShopChatResponse
 from repositories.products import ProductRepositories
 from models.products import ProductUpdate
 import json
+from typing import Dict, Any, Optional, List
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/shop/inventory", tags=["Shop Inventory"])
 
 class InventoryAgent(BaseShopAgent):
-    def __init__(self, shop_id: int):
+    def __init__(self, shop_id: int, db: Session):
         super().__init__(shop_id)
         self.agent = AssistantAgent(
             name="inventory_management_agent",
@@ -30,6 +32,7 @@ class InventoryAgent(BaseShopAgent):
             llm_config={"config_list": config_list},
             human_input_mode="NEVER"
         )
+        self.product_repository = ProductRepositories(db)
 
     async def process(self, request: ShopChatRequest) -> ShopChatResponse:
         try:
@@ -203,6 +206,88 @@ class InventoryAgent(BaseShopAgent):
                 "Đã có lỗi xảy ra khi đề xuất nhập hàng. Vui lòng thử lại sau.",
                 {"error": str(e)}
             )
+
+class Inventory:
+    def __init__(self, db: Session):
+        self.db = db
+        self.agent = InventoryAgent(shop_id=1, db=db)  # Pass db to InventoryAgent
+        self.product_repository = ProductRepositories(db)
+
+    async def check_stock(self, product_id: int, quantity: int) -> bool:
+        """Check if there is enough stock for a product"""
+        try:
+            product = await self.product_repository.get_by_id(product_id)
+            if not product:
+                return False
+            return product.stock_quantity >= quantity
+        except Exception as e:
+            logger.error(f"Error checking stock: {str(e)}")
+            return False
+
+    async def update_stock(self, product_id: int, quantity_change: int) -> Dict[str, Any]:
+        """Update product stock quantity"""
+        try:
+            product = await self.product_repository.get_by_id(product_id)
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
+            
+            new_quantity = product.stock_quantity + quantity_change
+            if new_quantity < 0:
+                raise HTTPException(status_code=400, detail="Insufficient stock")
+            
+            update_data = ProductUpdate(stock_quantity=new_quantity)
+            updated_product = await self.product_repository.update(product_id, update_data)
+            
+            return {
+                "product_id": product_id,
+                "old_stock": product.stock_quantity,
+                "new_stock": new_quantity,
+                "change": quantity_change
+            }
+        except Exception as e:
+            logger.error(f"Error updating stock: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_low_stock_products(self, threshold: int = 10) -> List[Dict[str, Any]]:
+        """Get list of products with low stock"""
+        try:
+            products = await self.product_repository.get_by_shop(self.agent.shop_id)
+            low_stock_products = [
+                {
+                    "product_id": p.product_id,
+                    "name": p.name,
+                    "current_stock": p.stock_quantity
+                }
+                for p in products
+                if p.stock_quantity <= threshold
+            ]
+            return low_stock_products
+        except Exception as e:
+            logger.error(f"Error getting low stock products: {str(e)}")
+            return []
+
+    async def get_total_inventory_value(self) -> float:
+        """Calculate total inventory value"""
+        try:
+            products = await self.product_repository.get_by_shop(self.agent.shop_id)
+            total_value = sum(p.price * p.stock_quantity for p in products)
+            return total_value
+        except Exception as e:
+            logger.error(f"Error calculating total inventory value: {str(e)}")
+            return 0.0
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process an inventory management request"""
+        try:
+            response = await self.agent.process_request(ShopChatRequest(**request))
+            return response.dict()
+        except Exception as e:
+            logger.error(f"Error processing request: {str(e)}")
+            return {
+                "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error",
+                "error": str(e)
+            }
 
 # Add router endpoints
 @router.get("/")

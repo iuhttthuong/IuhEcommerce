@@ -31,6 +31,12 @@ class ShopStatsRequest(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
 
+class AnalyticsRequest(BaseModel):
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    metrics: Optional[List[str]] = None  # List of metrics to include in the analysis
+    filters: Optional[Dict[str, Any]] = None  # Additional filters for the analysis
+
 # Response Schemas
 class ShopBasicResponse(BaseModel):
     id: int

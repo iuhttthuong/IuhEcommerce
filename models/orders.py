@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pydantic import BaseModel
 import enum
 from models.base import Base, TimestampMixin
+from models.order_items import OrderItem, OrderItemCreate, OrderItemUpdate, OrderItemResponse
 
 class OrderStatus(str, enum.Enum):
     PENDING = "pending"
@@ -13,61 +14,6 @@ class OrderStatus(str, enum.Enum):
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
-
-class OrderItem(Base, TimestampMixin):
-    __tablename__ = "order_items"
-    
-    order_item_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.order_id"), nullable=False)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.product_id"), nullable=False)
-    quantity: Mapped[int] = mapped_column(nullable=False)
-    price: Mapped[float] = mapped_column(DECIMAL, nullable=False)
-    discount: Mapped[Optional[float]] = mapped_column(DECIMAL, nullable=True)
-    total: Mapped[float] = mapped_column(DECIMAL, nullable=False)
-
-    # Relationships
-    order: Mapped["Order"] = relationship("Order", back_populates="items")
-    product: Mapped["Product"] = relationship("Product", back_populates="order_items")
-
-class OrderItemCreate(BaseModel):
-    order_id: int
-    product_id: int
-    quantity: int
-    price: float
-    discount: Optional[float] = None
-    total: float
-
-    class Config:
-        from_attributes = True
-        validate_by_name = True
-        use_enum_values = True
-
-class OrderItemUpdate(BaseModel):
-    quantity: Optional[int] = None
-    price: Optional[float] = None
-    discount: Optional[float] = None
-    total: Optional[float] = None
-
-    class Config:
-        from_attributes = True
-        validate_by_name = True
-        use_enum_values = True
-
-class OrderItemResponse(BaseModel):
-    order_item_id: int
-    order_id: int
-    product_id: int
-    quantity: int
-    price: float
-    discount: Optional[float]
-    total: float
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-        validate_by_name = True
-        use_enum_values = True
 
 class Order(Base, TimestampMixin):
     __tablename__ = "orders"

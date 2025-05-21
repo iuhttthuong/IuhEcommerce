@@ -5,8 +5,9 @@ from .base import config_list, BaseShopAgent, ShopChatRequest, ShopChatResponse
 from repositories.products import ProductRepositories
 from models.products import ProductCreate, ProductUpdate
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/shop/products", tags=["Shop Products"])
 
@@ -223,6 +224,81 @@ class ProductManagementAgent(BaseShopAgent):
                 "Đã có lỗi xảy ra khi lấy thông tin sản phẩm. Vui lòng thử lại sau.",
                 {"error": str(e)}
             )
+
+class ProductManagement:
+    def __init__(self, db: Session):
+        self.db = db
+        self.agent = ProductManagementAgent(shop_id=1)  # Default shop_id, should be set properly in production
+        self.product_repository = ProductRepositories(db)
+
+    async def create_product(self, product_data: ProductCreate) -> Dict[str, Any]:
+        """Create a new product"""
+        try:
+            product = await self.product_repository.create(product_data)
+            return product
+        except Exception as e:
+            logger.error(f"Error creating product: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def update_product(self, product_id: int, product_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update product information"""
+        try:
+            update_data = ProductUpdate(**product_data)
+            product = await self.product_repository.update(product_id, update_data)
+            return product
+        except Exception as e:
+            logger.error(f"Error updating product: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_product(self, product_id: int) -> Dict[str, Any]:
+        """Get product details"""
+        try:
+            product = await self.product_repository.get_by_id(product_id)
+            if not product:
+                raise HTTPException(status_code=404, detail="Product not found")
+            return product
+        except Exception as e:
+            logger.error(f"Error getting product: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def list_products(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """List all products with optional filters"""
+        try:
+            products = await self.product_repository.get_by_shop(self.agent.shop_id)
+            if filters:
+                # Apply filters
+                if "category" in filters:
+                    products = [p for p in products if p.category_id == filters["category"]]
+                if "min_price" in filters:
+                    products = [p for p in products if p.price >= filters["min_price"]]
+                if "max_price" in filters:
+                    products = [p for p in products if p.price <= filters["max_price"]]
+            return products
+        except Exception as e:
+            logger.error(f"Error listing products: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    async def get_total_products(self) -> int:
+        """Get total number of products"""
+        try:
+            products = await self.product_repository.get_by_shop(self.agent.shop_id)
+            return len(products)
+        except Exception as e:
+            logger.error(f"Error getting total products: {str(e)}")
+            return 0
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a product management request"""
+        try:
+            response = await self.agent.process_request(ShopChatRequest(**request))
+            return response.dict()
+        except Exception as e:
+            logger.error(f"Error processing request: {str(e)}")
+            return {
+                "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error",
+                "error": str(e)
+            }
 
 # Add router endpoints
 @router.get("/")
