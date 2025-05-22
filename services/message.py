@@ -1,38 +1,49 @@
-import uuid
 from models.chats import ChatMessageCreate, ChatMessageResponse, UpdateMessagePayload
 from repositories.message import MessageRepository
+from typing import List
 
 
 class MessageService:
     @staticmethod
     def create_message(payload: ChatMessageCreate) -> ChatMessageResponse:
-        message = MessageRepository.create_message(payload)
-        return ChatMessageResponse.model_validate(message)
+        return MessageRepository.create_message(payload)
 
     @staticmethod
     def get_message(message_id: int) -> ChatMessageResponse:
-        message = MessageRepository.get_message(message_id)
-        if not message:
-            raise ValueError(f"Message with ID {message_id} not found")
-        return ChatMessageResponse.model_validate(message)
+        return MessageRepository.get_message(message_id)
 
     @staticmethod
     def update_message(message_id: int, payload: UpdateMessagePayload) -> ChatMessageResponse:
-        message = MessageRepository.update_message(message_id, payload)
-        if not message:
-            raise ValueError(f"Message with ID {message_id} not found")
-        return ChatMessageResponse.model_validate(message)
+        return MessageRepository.update_message(message_id, payload)
 
     @staticmethod
     def delete_message(message_id: int) -> None:
         MessageRepository.delete_message(message_id)
 
     @staticmethod
-    def get_recent_messages(chat_id: int, limit: int = 5) -> list[ChatMessageResponse]:
-        messages = MessageRepository.get_recent_messages(chat_id, limit)
-        return [ChatMessageResponse.model_validate(msg) for msg in messages]
+    def get_recent_messages(chat_id: int, limit: int = 5) -> List[ChatMessageResponse]:
+        return MessageRepository.get_recent_messages(chat_id, limit)
 
     @staticmethod
-    def get_all_messages_in_chat(chat_id: int) -> list[ChatMessageResponse]:
-        messages = MessageRepository.get_all_messages_in_chat(chat_id)
-        return [ChatMessageResponse.model_validate(msg) for msg in messages]
+    def get_all_messages_in_chat(chat_id: int) -> List[ChatMessageResponse]:
+        return MessageRepository.get_all_messages_in_chat(chat_id)
+
+    @staticmethod
+    def create_agent_message(payload: ChatMessageCreate) -> ChatMessageResponse:
+        # Add agent-specific metadata
+        if not payload.metadata:
+            payload.metadata = {}
+        payload.metadata["is_agent_message"] = True
+        return MessageRepository.create_message(payload)
+
+    @staticmethod
+    def get_agent_messages(agent_id: str, limit: int = 10) -> List[ChatMessageResponse]:
+        return MessageRepository.get_messages_by_sender(agent_id, limit)
+
+    @staticmethod
+    def get_agent_chat_messages(agent_id: str, chat_id: int) -> List[ChatMessageResponse]:
+        return MessageRepository.get_messages_by_sender_and_chat(agent_id, chat_id)
+
+    @staticmethod
+    def get_agent_conversation_history(agent_id: str, chat_id: int, limit: int = 10) -> List[ChatMessageResponse]:
+        return MessageRepository.get_conversation_history(agent_id, chat_id, limit)

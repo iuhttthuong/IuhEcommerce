@@ -24,7 +24,11 @@ from controllers import (discounts,
                         product_info_agent,
                         search_discovery_agent,
                         user_profile_agent,
-                        shops
+                        shops,
+                        reviews,
+                        shopping_carts,
+                        cart_items,
+                        orders
 )
 from controllers.shops import router as shop_controller
 from routers.shop_chat import router as shop_chat_router
@@ -53,6 +57,12 @@ if AppEnvironment.is_local_env(env.APP_ENV):
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
+app.include_router(shopping_carts.router, prefix="/api/shopping-carts", tags=["Shopping Carts"])
+app.include_router(cart_items.router, prefix="/api/cart-items", tags=["Cart Items"])
+
+app.include_router(orders.router, prefix="/api/orders", tags=["Orders"])
 
 # Customer related endpoints
 app.include_router(chat.router, prefix="/api/customer/chat", tags=["Customer Chat"])

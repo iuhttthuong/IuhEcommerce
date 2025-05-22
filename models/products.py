@@ -32,17 +32,12 @@ class Product(Base, TimestampMixin):
     availability: Mapped[bool] = mapped_column(nullable=True)
 
     # Relationships
-    category: Mapped["Category"] = relationship("Category", back_populates="products")
-    brand: Mapped["Brand"] = relationship("Brand", back_populates="products")
-    shop: Mapped["Shop"] = relationship("Shop", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Shop.shop_id")
-    seller: Mapped["Seller"] = relationship("Seller", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Seller.seller_id")
-    images: Mapped[List["ProductImage"]] = relationship("ProductImage", back_populates="product")
-    warranties: Mapped[List["Warranty"]] = relationship("Warranty", back_populates="product")
-    inventory: Mapped["Inventory"] = relationship("Inventory", back_populates="product")
-    discounts: Mapped[List["Discount"]] = relationship("Discount", secondary="product_discounts", back_populates="products", overlaps="product_discounts")
-    order_items: Mapped[List["OrderItem"]] = relationship("OrderItem", back_populates="product")
-    promotions: Mapped[List["Promotion"]] = relationship("Promotion", back_populates="product")
+    category: Mapped["Category"] = relationship("Category", back_populates="products", lazy="select")
+    brand: Mapped["Brand"] = relationship("Brand", back_populates="products", lazy="select")
+    shop: Mapped["Shop"] = relationship("Shop", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Shop.shop_id", overlaps="products,seller", lazy="select")
+    seller: Mapped["Seller"] = relationship("Seller", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Seller.seller_id", overlaps="products,shop", lazy="select")
 
+    
 class ProductBase(BaseModel):
     name: Optional[str] = None
     product_short_url: Optional[str] = None

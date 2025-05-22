@@ -1,45 +1,34 @@
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import ForeignKey, TIMESTAMP, String, Boolean, JSON
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import ForeignKey, DECIMAL, TIMESTAMP
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pydantic import BaseModel
+from typing import List
 from models.base import Base, TimestampMixin
+from models.cart_items import CartItem
 
 class ShoppingCart(Base, TimestampMixin):
     __tablename__ = "shopping_carts"
-    
     cart_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    cart_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.customer_id"), nullable=False)
+
+    items: Mapped[List["CartItem"]] = relationship("CartItem", backref="cart", cascade="all, delete-orphan")
 
 class ShoppingCartCreate(BaseModel):
-    user_id: int
-    cart_metadata: Optional[dict] = None
+    customer_id: int
 
     class Config:
         from_attributes = True
         validate_by_name = True
         use_enum_values = True
 
-class ShoppingCartUpdate(BaseModel):
-    is_active: Optional[bool] = None
-    cart_metadata: Optional[dict] = None
-
-    class Config:
-        from_attributes = True
-        validate_by_name = True
-        use_enum_values = True
-
-class ShoppingCartResponse(BaseModel):
+class ShoppingCartModel(BaseModel):
     cart_id: int
-    user_id: int
-    is_active: bool
-    cart_metadata: Optional[dict]
+    customer_id: int
     created_at: datetime
     updated_at: datetime
-
     class Config:
         from_attributes = True
         validate_by_name = True
-        use_enum_values = True 
+        use_enum_values = True
+    
+    

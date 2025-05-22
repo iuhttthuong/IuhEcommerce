@@ -14,9 +14,6 @@ class ProductImage(Base):
     medium_url: Mapped[str] = mapped_column(nullable=False)
     is_gallery: Mapped[bool] = mapped_column(nullable=True)
 
-    # Relationships
-    product: Mapped["Product"] = relationship("Product", back_populates="images")
-
 
 class ProductImageCreate(BaseModel):
     product_id: int

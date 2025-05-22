@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException
-from models.shopping_carts import ShoppingCart, ShoppingCartModel, ShoppingCartCreate
+from models.shopping_carts import  ShoppingCartModel, ShoppingCartCreate
 from services.shopping_carts import ShoppingCartService
-from typing import List
 
 router = APIRouter(prefix="/shopping_carts", tags=["shopping_carts"])
 @router.post("/add", response_model=ShoppingCartModel)
 def create(payload: ShoppingCartCreate):
     try:
+
         cart = ShoppingCartService.create(payload)
         return cart
     except Exception as e:
@@ -14,8 +14,8 @@ def create(payload: ShoppingCartCreate):
 @router.get("/get/{cart_id}", response_model=ShoppingCartModel)
 def get(cart_id: int):
     try:
-        cart = ShoppingCartService.get(cart_id)
-        return cart
+        return ShoppingCartService.get(cart_id)
+
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -52,6 +52,4 @@ def get_shopping_cart_by_customer_id(customer_id: int) -> list[ShoppingCartModel
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def main():
-    print(get_shopping_cart_by_customer_id(1) )
-main()
+

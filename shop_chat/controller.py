@@ -5,10 +5,8 @@ from loguru import logger
 from .base import ShopRequest, get_shop_info
 from .product_management import ProductManagementAgent
 from .inventory import InventoryAgent
-from .order import OrderAgent
 from .marketing import MarketingAgent
 from .analytics import AnalyticsAgent
-from .finance import FinanceAgent
 from .policy import PolicyAgent
 from .customer_service import CustomerServiceAgent
 
@@ -22,17 +20,11 @@ async def call_shop_agent(agent, request):
         elif agent == "InventoryAgent":
             agent = InventoryAgent()
             result = await agent.process_request(request)
-        elif agent == "OrderAgent":
-            agent = OrderAgent()
-            result = await agent.process_request(request)
         elif agent == "MarketingAgent":
             agent = MarketingAgent()
             result = await agent.process_request(request)
         elif agent == "AnalyticsAgent":
             agent = AnalyticsAgent()
-            result = await agent.process_request(request)
-        elif agent == "FinanceAgent":
-            agent = FinanceAgent()
             result = await agent.process_request(request)
         elif agent == "PolicyAgent":
             agent = PolicyAgent()

@@ -1,4 +1,3 @@
-
 from models.shopping_carts import ShoppingCart, ShoppingCartCreate, ShoppingCartModel
 from repositories.shopping_carts import ShoppingCartRepository
 

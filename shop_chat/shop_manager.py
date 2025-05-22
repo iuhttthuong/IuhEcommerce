@@ -2,10 +2,8 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
-from .product_management import ProductManagement
+from .product_management import ProductManagement, ProductManagementAgent
 from .inventory import Inventory
-from .order import Order
-from .finance import Finance
 from .marketing import Marketing
 from .customer_service import CustomerService
 from .analytics import Analytics
@@ -21,13 +19,12 @@ from env import env
 from db import get_db
 import json
 from loguru import logger
+from .base import ShopChatRequest, ShopChatResponse
 
 class ShopManager:
     def __init__(self, db: Session = Depends(get_db)):
         self.product_mgmt = ProductManagement(db)
         self.inventory = Inventory(db)
-        self.order_mgmt = Order(db)
-        self.finance = Finance(db)
         self.marketing = Marketing(db)
         self.customer_service = CustomerService(db)
         self.analytics = Analytics(db)
@@ -48,73 +45,117 @@ class ShopManager:
             Bạn sẽ nhận đầu vào câu hỏi của chủ shop về quản lý shop
             Nhiệm vụ của bạn là trả lời câu hỏi của chủ shop một cách chính xác và đầy đủ nhất có thể
             Nếu bạn chưa đủ thông tin trả lời, bạn hãy sử dụng các trợ lý khác để tìm kiếm thông tin
-            Hãy trả về mô tả truy vấn dưới dạng JSON:"
-                "agent": "ProductManagementAgent" | "InventoryAgent" | "OrderAgent" | "FinanceAgent" | "MarketingAgent" | "CustomerServiceAgent" | "AnalyticsAgent" | "MySelf",
+
+            Khi nhận được câu hỏi, hãy phân tích và trả về JSON với agent phù hợp:
+            - Nếu là câu hỏi về danh sách sản phẩm (ví dụ: "tôi có những sản phẩm nào", "danh sách sản phẩm", "liệt kê sản phẩm") => Sử dụng ProductManagementAgent
+            - Nếu là câu hỏi về thêm/sửa/xóa sản phẩm => Sử dụng ProductManagementAgent
+            - Nếu là câu hỏi về tồn kho => Sử dụng InventoryAgent
+            - Nếu là câu hỏi về khách hàng => Sử dụng CustomerServiceAgent
+            - Nếu là câu hỏi về marketing => Sử dụng MarketingAgent
+            - Nếu là câu hỏi về báo cáo => Sử dụng AnalyticsAgent
+            - Nếu là câu hỏi về chính sách shop => Sử dụng PolicyAgent
+
+            Hãy trả về mô tả truy vấn dưới dạng JSON:
+            ```json
+            {
+                "agent": "ProductManagementAgent" | "InventoryAgent" | "MarketingAgent" | "CustomerServiceAgent" | "AnalyticsAgent" | "PolicyAgent" | "MySelf",
                 "query": String
-            Với Agent là tên của trợ lý mà bạn muốn sử dụng để tìm kiếm thông tin
-                Trong đó ProductManagementAgent là trợ lý quản lý sản phẩm
-                Trong đó InventoryAgent là trợ lý quản lý kho
-                Trong đó OrderAgent là trợ lý quản lý đơn hàng
-                Trong đó FinanceAgent là trợ lý quản lý tài chính
-                Trong đó MarketingAgent là trợ lý quản lý marketing
-                Trong đó CustomerServiceAgent là trợ lý quản lý dịch vụ khách hàng
-                Trong đó AnalyticsAgent là trợ lý phân tích dữ liệu
-                Trong đó MySelf là trợ lý trả lời câu hỏi bình thường
+            }
+            ```
+
+            Với Agent là tên của trợ lý mà bạn muốn sử dụng để tìm kiếm thông tin:
+            - ProductManagementAgent: Quản lý sản phẩm (thêm, sửa, xóa, liệt kê)
+            - InventoryAgent: Quản lý kho hàng
+            - MarketingAgent: Quản lý marketing và khuyến mãi
+            - CustomerServiceAgent: Quản lý dịch vụ khách hàng
+            - AnalyticsAgent: Phân tích dữ liệu và báo cáo
+            - PolicyAgent: Quản lý chính sách shop
+            - MySelf: Trả lời câu hỏi chung
+
+            Lưu ý quan trọng:
+            1. KHÔNG yêu cầu người dùng cung cấp thông tin đăng nhập hoặc tên shop
+            2. KHÔNG hướng dẫn người dùng đăng nhập vào trang quản trị
+            3. Khi nhận được yêu cầu liệt kê sản phẩm:
+               - LUÔN sử dụng ProductManagementAgent
+               - KHÔNG trả về JSON trong câu trả lời
+               - KHÔNG yêu cầu ID người bán
+               - Chỉ trả về JSON khi cần chọn agent
+            4. Nếu không có sản phẩm nào, trả về thông báo "Chưa có sản phẩm nào trong cửa hàng của bạn"
+            5. KHÔNG trả về JSON trong câu trả lời cuối cùng, chỉ trả về JSON khi cần chọn agent
             """,    
             llm_config={"config_list": config_list},
             human_input_mode="NEVER"
         )
 
     async def process_chat_message(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Process chat message and return response"""
+        print(f"[DEBUG] Context at start: {context}")
         try:
-            # Ensure shop_id is in context
-            if 'shop_id' not in context:
-                context['shop_id'] = 1  # Default shop_id if not provided
-                
-            # Gọi chat agent để phân tích yêu cầu
+            # Luôn đảm bảo shop_id là số nguyên nếu có
+            if 'shop_id' in context and context['shop_id']:
+                context['shop_id'] = int(context['shop_id'])
+            else:
+                print("[DEBUG] Không có shop_id trong context, trả về hướng dẫn.")
+                return {
+                    "response": "Bạn vui lòng cung cấp shop_id hoặc thông tin nhận diện shop để tôi có thể lấy danh sách sản phẩm.",
+                    "agent": "ProductManagementAgent",
+                    "context": context,
+                    "timestamp": datetime.now().isoformat()
+                }
+            # Gọi agent
             chat_response = await self.chat_agent.a_generate_reply(
                 messages=[{"role": "user", "content": message}]
             )
-            
-            # Parse JSON response
             content = chat_response.get('content', '')
+            print(f"[DEBUG] Chat agent content: {content}")
             try:
                 json_start = content.find('{')
                 json_end = content.rfind('}') + 1
                 if json_start >= 0 and json_end > json_start:
                     json_str = content[json_start:json_end]
                     response = json.loads(json_str)
+                    print(f"[DEBUG] Parsed chat agent response: {response}")
                 else:
+                    print("[DEBUG] No JSON found in chat agent response")
                     response = {
                         "agent": "MySelf",
                         "query": message
                     }
             except Exception as e:
-                logger.error(f"Error parsing JSON: {e}")
+                print(f"[DEBUG] Error parsing JSON: {e}")
                 response = {
                     "agent": "MySelf",
                     "query": message
                 }
-
-            # Gọi agent phù hợp để xử lý yêu cầu
             agent = response.get("agent")
             query = response.get("query")
-            
+            print(f"[DEBUG] Selected agent: {agent}, query: {query}")
+            # LUÔN gọi _handle_list_products nếu agent là ProductManagementAgent và có shop_id
             if agent == "ProductManagementAgent":
-                result = await self.product_mgmt.process_request({"message": query, "context": context})
+                print("[DEBUG] Đã vào nhánh ProductManagementAgent, gọi _handle_list_products")
+                product_agent = ProductManagementAgent(shop_id=context['shop_id'], db=self.db)
+                result = await product_agent._handle_list_products(ShopChatRequest(message=query, context=context))
+                await self.chat_repo.save_message(message, result.message, context)
+                print(f"[DEBUG] Đã trả về kết quả liệt kê sản phẩm: {result.message}")
+                return {
+                    "response": result.message,
+                    "agent": "ProductManagementAgent",
+                    "context": context,
+                    "timestamp": datetime.now().isoformat()
+                }
+            # Các agent khác giữ nguyên
             elif agent == "InventoryAgent":
                 result = await self.inventory.process_request({"message": query, "context": context})
-            elif agent == "OrderAgent":
-                result = await self.order_mgmt.process_request({"message": query, "context": context})
-            elif agent == "FinanceAgent":
-                result = await self.finance.process_request({"message": query, "context": context})
             elif agent == "MarketingAgent":
                 result = await self.marketing.process_request({"message": query, "context": context})
             elif agent == "CustomerServiceAgent":
                 result = await self.customer_service.process_request({"message": query, "context": context})
             elif agent == "AnalyticsAgent":
                 result = await self.analytics.process_request({"message": query, "context": context})
+            elif agent == "PolicyAgent":
+                result = {
+                    "message": "Xin lỗi, tôi không hiểu yêu cầu của bạn. Bạn có thể thử lại không?",
+                    "type": "error"
+                }
             elif agent == "MySelf":
                 result = {
                     "message": "Xin chào! Tôi là trợ lý AI quản lý shop của IUH-Ecomerce. Tôi có thể giúp gì cho bạn?",
@@ -125,10 +166,8 @@ class ShopManager:
                     "message": "Xin lỗi, tôi không hiểu yêu cầu của bạn. Bạn có thể thử lại không?",
                     "type": "error"
                 }
-
             # Lưu tin nhắn vào database
             await self.chat_repo.save_message(message, result.get("message", str(result)), context)
-            
             # Get the chat session after saving the message
             session_id = context.get('session_id')
             if session_id:
@@ -147,6 +186,7 @@ class ShopManager:
 
         except Exception as e:
             logger.error(f"Error in process_chat_message: {str(e)}")
+            logger.exception("Full traceback:")
             raise HTTPException(status_code=500, detail=str(e))
 
     async def create_product(self, product_data: ProductCreate) -> Product:
@@ -165,25 +205,25 @@ class ShopManager:
         """List all products with optional filters"""
         return await self.product_mgmt.list_products(filters)
 
-    async def create_order(self, order_data: OrderCreate) -> OrderModel:
-        """Create a new order"""
-        # Check inventory
-        for item in order_data.items:
-            if not await self.inventory.check_stock(item.product_id, item.quantity):
-                raise ValueError(f"Insufficient stock for product {item.product_id}")
+    # async def create_order(self, order_data: OrderCreate) -> OrderModel:
+    #     """Create a new order"""
+    #     # Check inventory
+    #     for item in order_data.items:
+    #         if not await self.inventory.check_stock(item.product_id, item.quantity):
+    #             raise ValueError(f"Insufficient stock for product {item.product_id}")
         
-        # Create order
-        order = await self.order_mgmt.create_order(order_data)
+    #     # Create order
+    #     order = await self.order_mgmt.create_order(order_data)
         
-        # Update inventory
-        for item in order_data.items:
-            await self.inventory.update_stock(item.product_id, -item.quantity)
+    #     # Update inventory
+    #     for item in order_data.items:
+    #         await self.inventory.update_stock(item.product_id, -item.quantity)
         
-        return order
+    #     return order
 
-    async def get_order(self, order_id: int) -> OrderModel:
-        """Get order details"""
-        return await self.order_mgmt.get_order(order_id)
+    # async def get_order(self, order_id: int) -> OrderModel:
+    #     """Get order details"""
+    #     return await self.order_mgmt.get_order(order_id)
 
     async def update_order_status(self, order_id: int, status: str) -> OrderModel:
         """Update order status"""
@@ -209,8 +249,6 @@ class ShopManager:
         """Get shop summary including key metrics"""
         return {
             "total_products": await self.product_mgmt.get_total_products(),
-            "total_orders": await self.order_mgmt.get_total_orders(),
             "total_customers": await self.customer_service.get_total_customers(),
-            "revenue": await self.finance.get_total_revenue(),
             "inventory_value": await self.inventory.get_total_inventory_value()
         } 

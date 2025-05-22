@@ -1,77 +1,88 @@
-from db import Session
-from models.reviews import Review, ReviewCreate, ReviewUpdate
-from models.products import Product
-from models.customers import Customer
-from sqlalchemy import select, update, delete
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from models.reviews import Review, ReviewCreate, ReviewUpdate, ReviewResponse
+from loguru import logger
 
 class ReviewRepositories:
-    @staticmethod
-    def create(review: ReviewCreate) -> Review:
-        with Session() as session:
-            review = Review(**review.model_dump())
-            session.add(review)
-            session.commit()
-            session.refresh(review)
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(self, review_data: dict) -> Optional[Review]:
+        try:
+            db_review = Review(**review_data)
+            self.db.add(db_review)
+            self.db.commit()
+            self.db.refresh(db_review)
+            return db_review
+        except IntegrityError as e:
+            self.db.rollback()
+            logger.error(f"Error creating review: {str(e)}")
+            if "reviews_product_id_fkey" in str(e):
+                raise ValueError("Product does not exist")
+            elif "reviews_customer_id_fkey" in str(e):
+                raise ValueError("Customer does not exist")
+            raise
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error creating review: {str(e)}")
+            raise
+
+    def get_by_id(self, review_id: int) -> Optional[Review]:
+        try:
+            return self.db.query(Review).filter(Review.review_id == review_id).first()
+        except Exception as e:
+            logger.error(f"Error getting review by id: {str(e)}")
+            raise
+
+    def get_by_product(self, product_id: int) -> List[Review]:
+        try:
+            # Use distinct() to handle joined eager loading
+            return self.db.query(Review).filter(
+                Review.product_id == product_id
+            ).distinct().all()
+        except Exception as e:
+            logger.error(f"Error getting reviews by product: {str(e)}")
+            raise
+
+    def get_by_customer(self, customer_id: int) -> List[Review]:
+        try:
+            stmt = select(Review).where(Review.customer_id == customer_id)
+            return list(self.db.execute(stmt).scalars().all())
+        except Exception as e:
+            logger.error(f"Error getting reviews by customer: {str(e)}")
+            raise
+
+    def get_all(self) -> List[Review]:
+        try:
+            return self.db.query(Review).all()
+        except Exception as e:
+            logger.error(f"Error getting all reviews: {str(e)}")
+            raise
+
+    def update(self, review_id: int, review_data: dict) -> Optional[Review]:
+        try:
+            review = self.get_by_id(review_id)
+            if review:
+                for key, value in review_data.items():
+                    setattr(review, key, value)
+                self.db.commit()
+                self.db.refresh(review)
             return review
-    
-    @staticmethod
-    def get_by_id(review_id: int) -> Review:
-        with Session() as session:
-            review = session.get(Review, review_id)
-            if not review:
-                raise ValueError(f"Review with ID {review_id} not found")
-            return review
-    
-    @staticmethod
-    def get_by_product_id(product_id: int) -> list[Review]:
-        with Session() as session:
-            reviews = session.query(Review).filter(Review.product_id == product_id).all()
-            return reviews
-    
-    @staticmethod
-    def get_by_customer_id(customer_id: int) -> list[Review]:
-        with Session() as session:
-            reviews = session.query(Review).filter(Review.customer_id == customer_id).all()
-            return reviews
-    
-    @staticmethod
-    def update(review_id: int, data: ReviewUpdate) -> Review:
-        with Session() as session:
-            review = session.get(Review, review_id)
-            if not review:
-                raise ValueError(f"Review with ID {review_id} not found")
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error updating review: {str(e)}")
+            raise
 
-            for field, value in data.model_dump(exclude_unset=True).items():
-                setattr(review, field, value)
-
-            session.commit()
-            session.refresh(review)
-            return review
-    
-    @staticmethod
-    def delete(review_id: int):
-        with Session() as session:
-            review = session.get(Review, review_id)
-            if not review:
-                raise ValueError(f"Review with ID {review_id} not found")
-
-            session.delete(review)
-            session.commit()
-
-    @staticmethod
-    def get_product_reviews(product_id: int):
-        with Session() as session:
-            reviews = session.query(Review).filter(Review.product_id == product_id).all()
-            if not reviews:
-                return []
-
-            result = []
-            for review in reviews:
-                customer = session.get(Customer, review.customer_id)
-                review_data = {
-                    "review": review,
-                    "customer": customer
-                }
-                result.append(review_data)
-            return result 
+    def delete(self, review_id: int) -> bool:
+        try:
+            review = self.get_by_id(review_id)
+            if review:
+                self.db.delete(review)
+                self.db.commit()
+                return True
+            return False
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error deleting review: {str(e)}")
+            raise

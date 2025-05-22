@@ -22,9 +22,9 @@ def update(cart_id: int, product_id: int, quantity: int):
 def delete(cart_id: int, product_id: int):
     CartItemService.delete(cart_id, product_id)
     return {"message": "Cart item deleted successfully"}
-@router.get("/{customer_id}", response_model=list[CartItemModel])
-def get_cart_items_by_cart_id(customer_id: int) -> list[CartItemModel]:
-    cart_items = CartItemService.get_cart_items_by_cart_id(customer_id)
+@router.get("/{cart_id}", response_model=list[CartItemModel])
+def get_cart_items_by_cart_id(cart_id: int) -> list[CartItemModel]:
+    cart_items = CartItemService.get_cart_items_by_cart_id(cart_id)
     if not cart_items:
         raise HTTPException(status_code=404, detail="No cart items found")
     return cart_items

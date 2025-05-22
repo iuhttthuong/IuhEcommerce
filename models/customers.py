@@ -20,9 +20,9 @@ class Customer(Base):
 
     # Relationships
     chats: Mapped[List["Chat"]] = relationship("Chat", back_populates="customer")
-    order_status_updates: Mapped[List["OrderStatus"]] = relationship("OrderStatus", back_populates="customer")
     service_tickets: Mapped[List["CustomerService"]] = relationship("CustomerService", back_populates="customer", foreign_keys="CustomerService.customer_id")
     assigned_tickets: Mapped[List["CustomerService"]] = relationship("CustomerService", back_populates="assignee", foreign_keys="CustomerService.assigned_to")
+    reviews: Mapped[List["Review"]] = relationship("Review", back_populates="customer")
 
 class CustomerCreate(BaseModel):
     customer_fname: str

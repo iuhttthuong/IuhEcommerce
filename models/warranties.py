@@ -14,9 +14,6 @@ class Warranty(Base):
     warranty_url: Mapped[str] = mapped_column(nullable=False)
     return_policy: Mapped[str] = mapped_column(nullable=False)
 
-    # Relationships
-    product: Mapped["Product"] = relationship("Product", back_populates="warranties")
-
 class WarrantyCreate(BaseModel):
     product_id: int
     warranty_location: str

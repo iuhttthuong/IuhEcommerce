@@ -19,7 +19,7 @@ class SearchServices:
                 limit=limit,
                 collection_name=collection_name
             )
-            
+            print("😒👍👍😒😒❤️🤣😁😉😎results", results)
             if not results:
                 logger.warning(f"No results found for query: {query }")
                 return []

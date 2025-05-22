@@ -20,7 +20,7 @@ class Seller(Base, TimestampMixin):
     store_rating: Mapped[float] = mapped_column(DECIMAL, nullable=True)
 
     # Relationships
-    products: Mapped[List["Product"]] = relationship("Product", back_populates="seller")
+    products: Mapped[List["Product"]] = relationship("Product", back_populates="seller", overlaps="products")
 
 class SellerCreate(BaseModel):
     seller_id: int

@@ -36,7 +36,7 @@ class Payment(Base, TimestampMixin):
     notes: Mapped[Optional[str]] = mapped_column(Text)
     
     # Relationships
-    order = relationship("Order", back_populates="payment")
+    # order = relationship("Order", back_populates="payment")
 
 
 class PaymentCreate(BaseModel):

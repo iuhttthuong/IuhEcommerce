@@ -4,14 +4,9 @@ from sqlalchemy import func, and_, or_
 from datetime import datetime, timedelta
 import logging
 from models.categories import Category
-from models.discounts import Discount
-from models.inventories import Inventory
-from models.product_discounts import ProductDiscount
-from models.product_images import ProductImage
 from models.products import Product, ProductCreate, ProductResponse, ProductModel
 from models.brands import Brand
 from models.sellers import Seller
-from models.warranties import Warranty
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -63,21 +58,19 @@ class ProductRepositories:
 
     def delete(self, product_id: int) -> bool:
         """Delete a product"""
-        db_product = self.db.query(Product).filter(Product.product_id == product_id).first()
-        if db_product:
-            self.db.delete(db_product)
-            self.db.commit()
-            return True
-        return False
+        try:
+            db_product = self.db.query(Product).filter(Product.product_id == product_id).first()
+            if db_product:
+                self.db.delete(db_product)
+                self.db.commit()
+                return True
+            return False
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error deleting product: {str(e)}")
+            raise e
 
-    def get_by_shop(
-        self,
-        shop_id: int,
-        skip: int = 0,
-        limit: int = 100,
-        category: Optional[str] = None,
-        search: Optional[str] = None
-    ) -> List[Product]:
+    def get_by_shop(self, shop_id: int, skip: int = 0, limit: int = 100, category: Optional[str] = None, search: Optional[str] = None) -> List[Product]:
         """Get products by shop with optional filtering"""
         query = self.db.query(Product).filter(Product.seller_id == shop_id)
         

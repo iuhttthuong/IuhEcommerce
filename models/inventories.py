@@ -9,9 +9,7 @@ class Inventory(Base):
     product_id: Mapped[str] = mapped_column( ForeignKey("products.product_id"), primary_key=True)
     product_virtual_type: Mapped[int] = mapped_column(nullable=False)
     fulfillment_type: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=True)
-
-    # Relationships
-    product: Mapped["Product"] = relationship("Product", back_populates="inventory")
+    current_stock: Mapped[int] = mapped_column(nullable=True)
 
 class InventoryCreate(BaseModel):
     product_id: str

@@ -19,8 +19,8 @@ class OrderItem(Base, TimestampMixin):
     notes: Mapped[Optional[str]] = mapped_column(String(255))  # Optional notes about the item
     
     # Relationships
-    order = relationship("Order", back_populates="items")
-    product = relationship("Product", back_populates="order_items")
+    # order = relationship("Order", back_populates="items")
+    # product = relationship("Product", back_populates="order_items")
 
 
 class OrderItemCreate(BaseModel):

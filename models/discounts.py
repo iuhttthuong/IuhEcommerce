@@ -16,9 +16,6 @@ class Discount(Base):
     min_purchase_amount: Mapped[int] = mapped_column(nullable=False)
     max_discount_amount: Mapped[int] = mapped_column(nullable=False)
 
-    # Relationships
-    products: Mapped[List["Product"]] = relationship("Product", secondary="product_discounts", back_populates="discounts", overlaps="product_discounts")
-
 class DiscountCreate(BaseModel):
     discount_name: str
     discount_rate: float

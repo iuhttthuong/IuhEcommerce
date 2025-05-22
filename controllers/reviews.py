@@ -3,54 +3,50 @@
 
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from typing import List
-from models.reviews import ReviewCreatePayload, ReviewUpdatePayload, ReviewDeletePayload
-from services.reviews import ReviewService
+from models.reviews import Review, ReviewCreate, ReviewUpdate, ReviewResponse
+from repositories.reviews import ReviewRepositories
+from db import get_db
 
+router = APIRouter()
 
-router = APIRouter(prefix="/reviews", tags=["reviews"])
+@router.post("/", response_model=ReviewResponse)
+def create_review(review: ReviewCreate, db: Session = Depends(get_db)):
+    try:
+        review_repo = ReviewRepositories(db)
+        db_review = review_repo.create(review.model_dump())
+        return db_review
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/add", response_model=ReviewCreatePayload)
-def create_review(payload: ReviewCreatePayload):
-    try:
-        review = ReviewService.create_review(payload)
-        return JSONResponse(status_code=201, content=jsonable_encoder(review))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-@router.get("/get/{review_id}", response_model=ReviewCreatePayload)
-def get_review(review_id: int):
-    try:
-        review = ReviewService.get_review(review_id)
-        if not review:
-            raise HTTPException(status_code=404, detail="Review not found")
-        return JSONResponse(status_code=200, content=jsonable_encoder(review))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-@router.put("/update/{review_id}", response_model=ReviewUpdatePayload)    
-def update_review(review_id: int, payload: ReviewUpdatePayload):
-    try:
-        review = ReviewService.update_review(review_id, payload)
-        if not review:
-            raise HTTPException(status_code=404, detail="Review not found")
-        return JSONResponse(status_code=200, content=jsonable_encoder(review))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-@router.delete("/delete/{review_id}", response_model=ReviewDeletePayload)
-def delete_review(review_id: int):
-    try:
-        ReviewService.delete_review(review_id)
-        return JSONResponse(status_code=204, content={"message": "Review deleted successfully"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-@router.get("/get_reviews_by_product/{product_id}", response_model=List[ReviewCreatePayload])
-def get_reviews_by_product(product_id: int):
-    try:
-        reviews = ReviewService.get_reviews_by_product(product_id)
-        if not reviews:
-            raise HTTPException(status_code=404, detail="No reviews found for this product")
-        return JSONResponse(status_code=200, content=jsonable_encoder(reviews))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/{review_id}", response_model=ReviewResponse)
+def get_review(review_id: int, db: Session = Depends(get_db)):
+    review_repo = ReviewRepositories(db)
+    review = review_repo.get_by_id(review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return review
+
+@router.put("/{review_id}", response_model=ReviewResponse)
+def update_review(review_id: int, review: ReviewUpdate, db: Session = Depends(get_db)):
+    review_repo = ReviewRepositories(db)
+    db_review = review_repo.update(review_id, review.model_dump(exclude_unset=True))
+    if db_review is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return db_review
+
+@router.delete("/{review_id}")
+def delete_review(review_id: int, db: Session = Depends(get_db)):
+    review_repo = ReviewRepositories(db)
+    if not review_repo.delete(review_id):
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"message": "Review deleted successfully"}
+
+@router.get("/product/{product_id}", response_model=List[ReviewResponse])
+def get_product_reviews(product_id: int, db: Session = Depends(get_db)):
+    review_repo = ReviewRepositories(db)
+    reviews = review_repo.get_by_product(product_id)
+    return reviews

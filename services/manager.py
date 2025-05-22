@@ -29,14 +29,14 @@ class ManagerService:
             else:
                 # Use general search for other queries
                 search_results = SearchServices.search(
-                    payload=payload.content,
+                    query=payload.content,
                     collection_name=COLLECTIONS["faqs"],
                     limit=3
                 )
                 response = chat_completion_with_context(payload.content, context)
                 result = {
                     "response": response.get("response", "I couldn't find relevant information."),
-                    "search_results": search_results.get("results", []),
+                    "search_results": search_results,
                     "context": context
                 }
             

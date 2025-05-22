@@ -11,8 +11,10 @@ router = APIRouter(prefix="/chats", tags=["Chats"])
 
 @router.post("/", response_model=ChatResponse)
 def create_chat(payload: ChatCreate, db: Session = Depends(get_db)):
+    # Loại bỏ shop_id, chỉ tạo chat với customer_id
     service = ChatService(db)
-    return service.create_session(payload)
+    # Tạo chat chỉ với customer_id, không truyền shop_id
+    return service.create_session(ChatCreate(customer_id=payload.customer_id))
 
 @router.post("/message")
 async def process_message(payload: ChatMessageCreate, db: Session = Depends(get_db)):
@@ -24,7 +26,7 @@ async def process_message(payload: ChatMessageCreate, db: Session = Depends(get_
     try:
         # Create or get chat session
         chat = service.create_session(ChatCreate(
-            shop_id=payload.shop_id,
+            shop_id=int(payload.sender_id) if payload.sender_type == "shop" else 1,  # Use sender_id as shop_id for shop messages
             customer_id=payload.sender_id if payload.sender_type == "customer" else None
         ))
         

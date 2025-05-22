@@ -11,7 +11,7 @@ import traceback
 from models.chats import ChatMessage, ChatMessageCreate, ChatCreate
 from autogen import register_function
 from env import env
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from loguru import logger
 
 from controllers.qdrant_agent import chatbot_endpoint as product_agent
@@ -34,14 +34,28 @@ config_list = [
         "api_type": "google"
     }
 ]
+
+class AgentMessage(BaseModel):
+    agent_id: str
+    agent_type: str
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class AgentResponse(BaseModel):
+    agent_id: str
+    agent_type: str
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+
 class ChatbotRequest(BaseModel):
     chat_id: int
     message: str
     context: dict = None
     user_id: Optional[int] = None
-    shop_id: Optional[int] = None  # Add shop_id field
+    shop_id: Optional[int] = None
     entities: Optional[Dict[str, Any]] = None
-
+    agent_messages: Optional[List[AgentMessage]] = None
+    filters: Optional[Dict[str, Any]] = None
 
 Manager = ConversableAgent(
     name="manager",
@@ -104,35 +118,67 @@ async def get_product_info(query):
 
 
 ### call agent
-async def call_agent(agent, request): 
+async def call_agent(agent, request: ChatbotRequest):
     try:
+        agent_id = str(uuid.uuid4())
+        agent_type = agent
+        
+        # Create agent message
+        agent_message = AgentMessage(
+            agent_id=agent_id,
+            agent_type=agent_type,
+            content=request.message,
+            metadata={"context": request.context, "entities": request.entities}
+        )
+        
+        # Process with specific agent
         if agent == "ProductAgent":
-            # Gọi hàm tìm kiếm sản phẩm
             result = await product_agent(request)
-            return result
+            # Convert AgentResponse to dict format
+            if isinstance(result, AgentResponse):
+                result = {
+                    "message": result.content,
+                    "type": "product",
+                    "data": result.metadata
+                }
         elif agent == "PoliciAgent":
-            # Gọi hàm tìm kiếm chính sách
-            result = policy_agent(request)
-            return result
+            from controllers.polici_agent import ask_chatbot as policy_ask_chatbot
+            logger.info(f"Calling policy_ask_chatbot with request: {request}")
+            result = policy_ask_chatbot(request)
+            logger.info(f"Policy agent result: {result}")
+            
+            # Nếu result là dict kiểu {'response': ...}, lấy giá trị response
+            if isinstance(result, dict) and "response" in result:
+                answer = result["response"]
+                logger.info(f"Extracted answer from response: {answer}")
+            else:
+                answer = str(result)
+                logger.info(f"Using string result as answer: {answer}")
+                
+            result = {
+                "message": answer,
+                "type": "policy",
+                "data": {"answer": answer}
+            }
+            logger.info(f"Final formatted result: {result}")
         elif agent == "MySelf":
-            # For MySelf agent, return a friendly response directly
-            return {
+            result = {
                 "message": "Xin chào! Tôi là trợ lý AI của IUH-Ecomerce. Tôi có thể giúp gì cho bạn?",
                 "type": "greeting"
             }
         elif agent == "TransactionAgent":
-            # Gọi hàm tìm kiếm thông tin giao dịch
-            result = await search(request.message)
-            return result
+            search_results = await search(request.message, collection_name="product_embeddings", limit=5)
+            # Convert search results to dict format
+            result = {
+                "message": "Kết quả tìm kiếm giao dịch",
+                "type": "transaction",
+                "data": search_results
+            }
         elif agent == "OrchestratorAgent":
-            # Gọi orchestrator agent
             orchestrator = OrchestratorAgent()
             result = await orchestrator.process_request(request)
-            return result
         elif agent == "UserProfileAgent":
-            # Gọi user profile agent
             user_profile = UserProfileAgent()
-            # Convert ChatbotRequest to UserProfileRequest
             user_request = UserProfileRequest(
                 chat_id=request.chat_id,
                 user_id=request.user_id,
@@ -140,50 +186,99 @@ async def call_agent(agent, request):
                 entities=request.entities or {}
             )
             result = await user_profile.process_request(user_request)
-            # Convert UserProfileResponse to dict format
-            return {
+            result = {
                 "message": result.content,
                 "type": "user_profile",
                 "user_data": result.user_data,
                 "success": result.success
             }
         elif agent == "SearchDiscoveryAgent":
-            # Gọi search discovery agent
             search_agent = SearchDiscoveryAgent()
             result = await search_agent.process_search(request)
-            return result
+            # Convert SearchResponse to dict format
+            if hasattr(result, 'content'):
+                result = {
+                    "message": result.content,
+                    "type": "search",
+                    "data": result.dict() if hasattr(result, 'dict') else result
+                }
         elif agent == "RecommendationAgent":
-            # Gọi recommendation agent
             recommendation_agent = RecommendationAgent()
             result = await recommendation_agent.process_recommendation(request)
-            return result
         elif agent == "ProductInfoAgent":
-            # Gọi product info agent
             product_info_agent = ProductInfoAgent()
             result = await product_info_agent.process_request(request)
-            return result
         elif agent == "ReviewAgent":
-            # Gọi review agent
             review_agent = ReviewAgent()
             result = await review_agent.process_request(request)
-            return result
         elif agent == "ProductComparisonAgent":
-            # Gọi product comparison agent
             comparison_agent = ProductComparisonAgent()
             result = await comparison_agent.process_request(request)
-            return result
         else:
-            return {
+            result = {
                 "message": "Xin lỗi, tôi không hiểu yêu cầu của bạn. Bạn có thể thử lại không?",
                 "type": "error"
             }
+
+        # Create agent response
+        if isinstance(result, dict):
+            content = result.get("message", str(result))
+            metadata = {"type": result.get("type"), "data": result}
+        else:
+            content = str(result)
+            metadata = {"type": "unknown", "data": str(result)}
+
+        agent_response = AgentResponse(
+            agent_id=agent_id,
+            agent_type=agent_type,
+            content=content,
+            metadata=metadata
+        )
+
+        # Save agent message and response
+        message_payload = ChatMessageCreate(
+            chat_id=request.chat_id,
+            content=request.message,
+            sender_type="agent",
+            sender_id=agent_id,
+            message_metadata={"agent_type": agent_type}
+        )
+        MessageRepository.create_message(message_payload)
+
+        # Convert AgentResponse to dict for database storage
+        response_metadata = {
+            "agent_type": agent_type,
+            "response_data": {
+                "content": agent_response.content,
+                "type": metadata.get("type"),
+                "data": metadata.get("data")
+            }
+        }
+
+        response_payload = ChatMessageCreate(
+            chat_id=request.chat_id,
+            content=agent_response.content,
+            sender_type="agent_response",
+            sender_id=agent_id,
+            message_metadata=response_metadata
+        )
+        MessageRepository.create_message(response_payload)
+
+        return {
+            "agent_id": agent_response.agent_id,
+            "agent_type": agent_response.agent_type,
+            "content": agent_response.content,
+            "metadata": agent_response.metadata
+        }
+
     except Exception as e:
         logger.error(f"Error in call_agent: {str(e)}")
-        return {
-            "message": "Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
-            "type": "error",
-            "error": str(e)
-        }
+        return AgentResponse(
+            agent_id=agent_id,
+            agent_type=agent_type,
+            content="Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+            metadata={"type": "error", "error": str(e)}
+        )
 
 @router.post("/ask")
 async def ask_chatbot(request: ChatbotRequest):
@@ -229,33 +324,24 @@ async def ask_chatbot(request: ChatbotRequest):
                 chat_id=request.chat_id,
                 content=message,
                 sender_type="customer",
-                sender_id=request.user_id or 1  # Use provided user_id or default to 1
+                sender_id=str(request.user_id or 1),  # Convert to string
+                message_metadata={"user_id": request.user_id}
             )
             MessageRepository.create_message(message_payload)
 
-            # Xử lý tin nhắn và gọi agent phù hợp
+            # Process message and get agent response
             response = await get_product_info(message)
             agent = response.get("agent")
             query = response.get("query")
 
             if agent and query:
                 result = await call_agent(agent, request)
-                
-                # Lưu phản hồi của agent vào database
-                try:
-                    response_payload = ChatMessageCreate(
-                        chat_id=request.chat_id,
-                        content=result.get("message", str(result)),
-                        sender_type="shop",
-                        sender_id=request.shop_id if request.shop_id is not None else 1  # Use shop_id if available, otherwise default to 1
-                    )
-                    MessageRepository.create_message(response_payload)
-                except Exception as e:
-                    logger.error(f"Lỗi khi lưu phản hồi: {str(e)}")
-                
                 return result
             else:
-                raise HTTPException(status_code=400, detail="Invalid response from manager")
+                return {
+                    "message": "Xin lỗi, tôi không thể xử lý yêu cầu của bạn lúc này.",
+                    "type": "error"
+                }
 
         except Exception as e:
             logger.error(f"Lỗi khi xử lý tin nhắn: {str(e)}")
@@ -264,14 +350,35 @@ async def ask_chatbot(request: ChatbotRequest):
             db.close()
 
     except Exception as e:
-        logger.error(f"Lỗi không xác định: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in ask_chatbot: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
-@router.post("/chat", response_model=dict)
-def chat_with_manager(payload: ChatMessageCreate):
+@router.post("/chat", response_model=AgentResponse)
+async def chat_with_manager(payload: ChatbotRequest):
     try:
-        response = ManagerService.process_message(payload)
-        return response
+        # Process message and get agent response
+        response = await get_product_info(payload.message)
+        agent = response.get("agent")
+        query = response.get("query")
+
+        if agent and query:
+            result = await call_agent(agent, payload)
+            return result
+
+        return AgentResponse(
+            agent_id="manager",
+            agent_type="manager",
+            content="Xin lỗi, tôi không thể xử lý yêu cầu của bạn lúc này.",
+            metadata={"type": "error"}
+        )
+
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error in chat_with_manager: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 

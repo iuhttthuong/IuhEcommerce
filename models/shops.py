@@ -24,7 +24,6 @@ class Shop(Base, TimestampMixin):
     products: Mapped[List["Product"]] = relationship("Product", back_populates="shop", foreign_keys="Product.seller_id", primaryjoin="Shop.shop_id == Product.seller_id")
     chat_sessions: Mapped[List["Chat"]] = relationship("Chat", back_populates="shop")
     promotions: Mapped[List["Promotion"]] = relationship("Promotion", back_populates="shop")
-    finances: Mapped[List["Finance"]] = relationship("Finance", back_populates="shop")
     analytics: Mapped[List["Analytics"]] = relationship("Analytics", back_populates="shop")
     customer_service_tickets: Mapped[List["CustomerService"]] = relationship("CustomerService", back_populates="shop")
     policies: Mapped[List["Policy"]] = relationship("Policy", back_populates="shop")

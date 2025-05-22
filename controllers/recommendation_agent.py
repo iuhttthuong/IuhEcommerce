@@ -151,7 +151,7 @@ class RecommendationAgent:
                 logger.error(f"Error loading {encoder_type} encoder: {e}")
                 
         # Create new encoder
-        encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore', feature_names_out='one-to-one')
+        encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
         
         # Initialize with sample data based on encoder type
         if encoder_type == "category":
@@ -314,36 +314,34 @@ class RecommendationAgent:
             
             # One-hot encode categorical features
             if self.category_encoder and 'user_cat_pref' in df.columns:
-                user_cat_encoded = self.category_encoder.transform(df[['user_cat_pref']])
-                product_cat_encoded = self.category_encoder.transform(df[['product_category']])
+                # Create a new DataFrame with consistent column order
+                new_df = pd.DataFrame()
+                new_df['category'] = df['user_cat_pref']
+                cat_encoded = self.category_encoder.transform(new_df[['category']])
                 
                 # Create column names for the encoded features
-                user_cat_cols = [f'user_cat_{i}' for i in range(user_cat_encoded.shape[1])]
-                product_cat_cols = [f'product_cat_{i}' for i in range(product_cat_encoded.shape[1])]
+                cat_cols = [f'cat_{i}' for i in range(cat_encoded.shape[1])]
                 
                 # Add encoded features to dataframe
-                for i, col in enumerate(user_cat_cols):
-                    df[col] = user_cat_encoded[:, i]
-                for i, col in enumerate(product_cat_cols):
-                    df[col] = product_cat_encoded[:, i]
+                for i, col in enumerate(cat_cols):
+                    df[col] = cat_encoded[:, i]
                 
                 # Drop original categorical columns
                 df = df.drop(['user_cat_pref', 'product_category'], axis=1)
             
             # One-hot encode brand features
             if self.brand_encoder and 'brand_pref' in df.columns:
-                brand_pref_encoded = self.brand_encoder.transform(df[['brand_pref']])
-                product_brand_encoded = self.brand_encoder.transform(df[['product_brand']])
+                # Create a new DataFrame with consistent column order
+                new_df = pd.DataFrame()
+                new_df['brand'] = df['brand_pref']
+                brand_encoded = self.brand_encoder.transform(new_df[['brand']])
                 
                 # Create column names for the encoded features
-                brand_pref_cols = [f'brand_pref_{i}' for i in range(brand_pref_encoded.shape[1])]
-                product_brand_cols = [f'product_brand_{i}' for i in range(product_brand_encoded.shape[1])]
+                brand_cols = [f'brand_{i}' for i in range(brand_encoded.shape[1])]
                 
                 # Add encoded features to dataframe
-                for i, col in enumerate(brand_pref_cols):
-                    df[col] = brand_pref_encoded[:, i]
-                for i, col in enumerate(product_brand_cols):
-                    df[col] = product_brand_encoded[:, i]
+                for i, col in enumerate(brand_cols):
+                    df[col] = brand_encoded[:, i]
                 
                 # Drop original categorical columns
                 df = df.drop(['brand_pref', 'product_brand'], axis=1)
@@ -513,22 +511,49 @@ class RecommendationAgent:
             logger.error(f"Error finding similar products: {e}")
             return []
 
+    def _find_category_by_text(self, text: str) -> Optional[int]:
+        """Find category ID by searching in category_embeddings collection."""
+        try:
+            # Search in category_embeddings collection
+            search_results = self.search_service.search(
+                query=text,
+                collection_name="category_embeddings",  # Use direct string instead of COLLECTIONS
+                limit=1
+            )
+            
+            if search_results and len(search_results) > 0:
+                # Return the category ID from the first result
+                return search_results[0].get("id")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding category by text: {e}")
+            return None
+
     def _find_products_by_category(self, category: str, limit: int = 5) -> List[Dict]:
         """Find products by category."""
         try:
             if not category:
                 logger.warning("Invalid category: None or empty")
                 return []
+            
+            # Find category ID using category_embeddings
+            category_id = self._find_category_by_text(category)
+            
+            if not category_id:
+                logger.warning(f"Category not found: {category}")
+                return []
                 
+            # Search by category ID
             search_results = self.search_service.search(
-                payload=f"category:{category}",
+                query=str(category_id),
                 collection_name=COLLECTIONS["products"],
-                limit=limit,
-                category=category
+                limit=limit
             )
             
             if not search_results:
-                logger.warning(f"No products found in category: {category}")
+                logger.warning(f"No products found in category ID: {category_id}")
                 return []
                 
             return search_results
@@ -537,31 +562,23 @@ class RecommendationAgent:
             logger.error(f"Error finding products by category: {e}")
             return []
 
-    def _get_category_id_by_name(self, category_name: str) -> Optional[int]:
-        """Get category ID from category name."""
-        # Simple mock implementation - in a real system would query the database
-        categories = {
-            "electronics": 1,
-            "fashion": 2,
-            "home": 3,
-            "beauty": 4,
-            "sports": 5,
-            "books": 6
-        }
-        return categories.get(category_name.lower())
-
     def _find_products_by_text(self, text: str, limit: int = 5, category: str = None) -> List[Dict]:
         """Find products by text search."""
         try:
             if not text:
                 logger.warning("Invalid search text: None or empty")
                 return []
+            
+            # Get category ID if category is provided
+            category_id = None
+            if category:
+                category_id = self._find_category_by_text(category)
                 
+            # Search for products
             search_results = self.search_service.search(
-                payload=text,
+                query=text,
                 collection_name=COLLECTIONS["products"],
-                limit=limit,
-                category=category
+                limit=limit
             )
             
             if not search_results:
@@ -577,12 +594,16 @@ class RecommendationAgent:
     def _find_popular_products(self, limit: int = 5, category: str = None) -> List[Dict]:
         """Find popular products based on ratings and sales."""
         try:
+            # Get category ID if category is provided
+            category_id = None
+            if category:
+                category_id = self._find_category_by_text(category)
+            
             # Search for popular products
             search_results = self.search_service.search(
-                payload="popular best selling",
+                query="popular best selling",
                 collection_name=COLLECTIONS["products"],
-                limit=limit,
-                category=category
+                limit=limit
             )
             
             if not search_results:
@@ -720,16 +741,16 @@ class RecommendationAgent:
         """Process recommendation request and return personalized recommendations."""
         try:
             # Use provided user profile or fetch it
-            user_profile = request.user_profile
+            user_profile = getattr(request, 'user_profile', None)
             if not user_profile and request.user_id:
                 user_profile = await self._get_user_profile(request.user_id)
             elif not user_profile:
                 # Create default user profile if none provided
                 user_profile = {
-                    "preferred_category": "electronics",
-                    "preferred_brand": "Apple",
-                    "price_min": 100000,
-                    "price_max": 5000000
+                    "preferred_category": "beauty",  # Default to beauty for lipstick
+                    "preferred_brand": "Maybelline",  # Default to popular makeup brand
+                    "price_min": 50000,  # Lower price range for affordable lipstick
+                    "price_max": 200000  # Upper limit for affordable lipstick
                 }
                 
             # Use provided context or create default

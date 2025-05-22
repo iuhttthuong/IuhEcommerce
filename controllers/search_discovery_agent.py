@@ -100,43 +100,19 @@ class SearchDiscoveryAgent:
                 "limit": 10
             }
 
-    def _execute_search(self, search_info: Dict[str, Any]) -> List[Dict]:
-        search_type = search_info.get("search_type", "keyword")
-        query = search_info.get("query", "")
-        filters = search_info.get("filters", {})
-        limit = search_info.get("limit", 10)
-        
-        # Xác định collection tìm kiếm dựa trên loại tìm kiếm
-        if search_type == "keyword":
-            collection_name = "product_name_embeddings"
-        elif search_type == "semantic":
-            collection_name = "product_des_embeddings"
-        else:
-            collection_name = "product_name_embeddings"
-            
-        # Thực hiện tìm kiếm
+    def _execute_search(self, query: str, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         try:
-            raw_results = SearchServices.search(
-                payload=query,
-                collection_name=collection_name,
-                limit=limit
+            # Call search service with correct parameters
+            results = SearchServices.search(
+                query=query,
+                collection_name="product_embeddings",
+                limit=5
             )
-            
-            # Trích product_id và gọi ProductServices.get
-            products = []
-            for pid in raw_results:
-                if pid:
-                    product = ProductServices.get(pid)
-                    if product:
-                        # Lọc kết quả nếu có bộ lọc
-                        if self._apply_filters(product.__dict__, filters):
-                            products.append(product.__dict__)
-            
-            return products
+            return results
         except Exception as e:
-            logger.error(f"Lỗi khi thực hiện tìm kiếm: {e}")
-            return []
-            
+            logger.error(f"Lỗi khi thực hiện tìm kiếm: {str(e)}")
+            raise
+
     def _apply_filters(self, product: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         if not filters:
             return True
@@ -201,63 +177,46 @@ class SearchDiscoveryAgent:
 
     async def process_search(self, request: SearchRequest) -> SearchResponse:
         try:
-            # Phân tích yêu cầu tìm kiếm
-            prompt = f"""
-            Hãy phân tích yêu cầu tìm kiếm sau từ người dùng:
-            "{request.message}"
-            
-            Các thực thể đã được xác định:
-            {request.entities if request.entities else 'Không có thông tin thực thể.'}
-            
-            Bộ lọc được cung cấp:
-            {request.filters if request.filters else 'Không có bộ lọc được cung cấp.'}
-            """
-            
-            # Gọi agent để phân tích yêu cầu tìm kiếm
-            agent_response = await self.agent.a_generate_reply(messages=[{"role": "user", "content": prompt}])
-            
-            # Trích xuất thông tin tìm kiếm
-            search_info = self._extract_search_query(agent_response)
-            search_query = search_info.get("query", "")
-            filters = search_info.get("filters", {})
-            
-            # Thực hiện tìm kiếm
-            products = self._execute_search(search_info)
-            
-            # Sắp xếp kết quả nếu có yêu cầu
-            sort_by = filters.get("sort_by", "")
-            sorted_products = self._sort_products(products, sort_by)
-            
-            # Tạo nội dung phản hồi
-            response_content = self._generate_response(sorted_products, search_info)
-            
-            # Lưu thông tin tương tác vào message repository
-            message_repository = MessageRepository()
-            response_payload = ChatMessageCreate(
+            # Extract search query and filters
+            query = request.message
+            filters = request.filters or {}
+
+            # Execute search
+            results = self._execute_search(query, filters)
+
+            # Format response
+            response_content = self._generate_response(results, {
+                "query": query,
+                "filters": filters
+            })
+
+            # Save search message
+            message_payload = ChatMessageCreate(
                 chat_id=request.chat_id,
-                sender_type="assistant",
-                sender_id=0,  # You may need to adjust this based on your requirements
-                content=response_content,
-                metadata={
-                    "intent": "product_search",
-                    "entities": request.entities,
-                    "confidence": 0.8  # Assuming a default confidence value
+                content=query,
+                sender_type="search",
+                sender_id=str(request.user_id or 1),
+                message_metadata={
+                    "type": "search",
+                    "query": query,
+                    "filters": filters,
+                    "result_count": len(results)
                 }
             )
-            message_repository.create(response_payload)
-            
+            MessageRepository.create_message(message_payload)
+
             return SearchResponse(
                 content=response_content,
-                products=sorted_products,
-                search_query=search_query,
+                products=results,
+                search_query=query,
                 filters_applied=filters,
-                total_results=len(sorted_products)
+                total_results=len(results)
             )
-            
+
         except Exception as e:
-            logger.error(f"Lỗi trong search_discovery_agent: {e}")
+            logger.error(f"Lỗi trong search_discovery_agent: {str(e)}")
             return SearchResponse(
-                content=f"Đã xảy ra lỗi khi tìm kiếm: {str(e)}",
+                content="Xin lỗi, đã có lỗi xảy ra khi tìm kiếm sản phẩm. Vui lòng thử lại sau.",
                 products=[],
                 search_query=request.message,
                 filters_applied={},

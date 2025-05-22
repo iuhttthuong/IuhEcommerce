@@ -69,7 +69,7 @@ def ensure_collections_exist():
                         size=3072,
                         distance=Distance.COSINE,
                         on_disk=True  # Store vectors on disk to save memory
-                    )},
+                    )}, 
                     on_disk_payload=True  # Store payload on disk
                 )
                 logger.info(f"✅ Created collection: {collection_name}")
@@ -151,29 +151,35 @@ def add_faq_to_qdrant(faq_id: int):
 def add_review_to_qdrant(review_id: int):
     """Thêm thông tin đánh giá vào Qdrant"""
     try:
-        review_info = ReviewRepositories.get_by_id(review_id)
-        review_data = preprocess_review(review_info)
-        embedding = generate_embedding(review_data)
-        
-        if embedding:
-            point = PointStruct(
-                id=review_id,
-                vector=embedding,
-                payload={
-                    "review_id": review_id,
-                    "product_id": review_info.get("product_id", ""),
-                    "customer_id": review_info.get("customer_id", ""),
-                    "rating": review_info.get("rating", 0),
-                    "comment": review_info.get("comment", ""),
-                    "text_content": review_data,
-                    "embedding_type": "review"
-                },
-                vector_name="default"
-            )
-            qdrant.upsert(collection_name=COLLECTIONS["reviews"], points=[point])
-            print(f"✅ Đã thêm embedding cho Review ID {review_id}.")
-        else:
-            print(f"❌ Không thể tạo embedding cho Review ID {review_id}.")
+        with Session() as db:
+            review_repo = ReviewRepositories(db)
+            review_info = review_repo.get_by_id(review_id)
+            if not review_info:
+                print(f"⚠️ Không tìm thấy Review với ID: {review_id}")
+                return
+                
+            review_data = preprocess_review(review_info)
+            embedding = generate_embedding(review_data)
+            
+            if embedding:
+                point = PointStruct(
+                    id=review_id,
+                    vector=embedding,
+                    payload={
+                        "review_id": review_id,
+                        "product_id": review_info.product_id,
+                        "customer_id": review_info.customer_id,
+                        "rating": review_info.rating,
+                        "comment": review_info.comment,
+                        "text_content": review_data,
+                        "embedding_type": "review"
+                    },
+                    vector_name="default"
+                )
+                qdrant.upsert(collection_name=COLLECTIONS["reviews"], points=[point])
+                print(f"✅ Đã thêm embedding cho Review ID {review_id}.")
+            else:
+                print(f"❌ Không thể tạo embedding cho Review ID {review_id}.")
 
     except Exception as e:
         print(f"⚠️ Lỗi khi xử lý Review ID {review_id}: {e}")

@@ -12,8 +12,8 @@ class ProductDiscount(Base):
     discount_id: Mapped[int] = mapped_column(ForeignKey(Discount.discount_id), primary_key=True)
 
     # Relationships
-    product: Mapped["Product"] = relationship("Product", backref="product_discounts", overlaps="discounts,products")
-    discount: Mapped["Discount"] = relationship("Discount", backref="product_discounts", overlaps="discounts,products")
+    product: Mapped["Product"] = relationship("Product", lazy="select")
+    discount: Mapped["Discount"] = relationship("Discount", lazy="select")
 
 class ProductDiscountCreate(BaseModel):
     product_id: int

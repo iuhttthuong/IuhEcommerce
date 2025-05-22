@@ -31,15 +31,12 @@ class ChatRepository:
     @staticmethod
     def delete(chat_id: int):
         with Session() as session:
-            # Xóa tất cả message liên quan trước
-            session.query(ChatMessage).filter(ChatMessage.chat_id == chat_id).delete()
-
-            # Sau đó xóa chat
             chat = session.get(Chat, chat_id)
             if chat:
                 session.delete(chat)
+                session.commit()
 
-            session.commit()
+
 
     @staticmethod
     def get_chat_by_user_id(user_id: int) -> list[ChatResponse]:

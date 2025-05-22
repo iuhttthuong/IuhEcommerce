@@ -24,22 +24,17 @@ class ShippingStatus(str, enum.Enum):
 
 
 class Shipping(Base, TimestampMixin):
-    __tablename__ = "shipping"
+    __tablename__ = "shipping_info"
     
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    shipping_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.order_id"), nullable=False)
-    method: Mapped[ShippingMethod] = mapped_column(Enum(ShippingMethod), nullable=False)
-    status: Mapped[ShippingStatus] = mapped_column(Enum(ShippingStatus), nullable=False, default=ShippingStatus.PENDING)
-    tracking_number: Mapped[Optional[str]] = mapped_column(String(100))
-    shipping_fee: Mapped[float] = mapped_column(nullable=False)
+    shiping_status: Mapped[ShippingStatus] = mapped_column(Enum(ShippingStatus), nullable=False, default=ShippingStatus.PENDING)
     estimated_delivery: Mapped[Optional[datetime]] = mapped_column()
-    actual_delivery: Mapped[Optional[datetime]] = mapped_column()
+    tracking_number: Mapped[Optional[str]] = mapped_column(String(100))  # Tracking number for the shipment
     carrier: Mapped[Optional[str]] = mapped_column(String(100))  # Shipping company name
-    address: Mapped[str] = mapped_column(Text, nullable=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
-    
+   
     # Relationships
-    order = relationship("Order", back_populates="shipping")
+    # order = relationship("Order", back_populates="shipping_info")oder_date
 
 
 class ShippingCreate(BaseModel):

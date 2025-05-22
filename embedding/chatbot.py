@@ -26,53 +26,84 @@ def retrieve_relevant_context(query_text: str, limit_per_collection: int = 3, sc
         contexts = []
         
         # Search products with lower threshold to capture more results
-        product_results = qdrant.search(
+        # product_results = qdrant.search(
+        #     collection_name=COLLECTIONS["products"],
+        #     query_vector={"default": query_vector},
+        #     limit=limit_per_collection + 2,  # Get more results to ensure we find relevant matches
+        #     with_payload=True,
+        #     score_threshold=score_threshold  # Lower threshold to include more matches
+        # )
+        product_results = qdrant.query_points(
             collection_name=COLLECTIONS["products"],
-            query_vector={"default": query_vector},
-            limit=limit_per_collection + 2,  # Get more results to ensure we find relevant matches
+            query= query_vector,
+            using="default",
+            limit=limit_per_collection + 2,
             with_payload=True,
-            score_threshold=score_threshold  # Lower threshold to include more matches
+            with_vectors=False,
         )
         
         # Check if product is specifically mentioned by name
         product_name_match = None
         for product in product_results:
-            product_name = product.payload.get('name', '')
+            product_name = product[1][0].payload.get('name', '')
             # Using regex to find product name regardless of case or diacritics
             if product_name and re.search(re.escape(product_name), query_text, re.IGNORECASE):
                 product_name_match = product
                 break
                 
-        # If we have an exact name match, prioritize it
+        # # If we have an exact name match, prioritize it
         if product_name_match:
             contexts.append(f"PRODUCT INFORMATION (EXACT MATCH):\n{product_name_match.payload.get('text_content', '')}")
             
-        # Add remaining products
+        # # Add remaining products
         for product in product_results:
             if product != product_name_match:  # Skip if it's the exact match we already added
-                contexts.append(f"PRODUCT INFORMATION:\n{product.payload.get('text_content', '')}")
+                contexts.append(f"PRODUCT INFORMATION:\n{product[1][0].payload.get('text_content', '')}")
         
         # Search FAQs
-        faq_results = qdrant.search(
+        # faq_results = qdrant.search(
+        #     collection_name=COLLECTIONS["faqs"],
+        #     query_vector={"default": query_vector},
+        #     limit=limit_per_collection,
+        #     with_payload=True
+        # )
+        faq_results = qdrant.query_points(
             collection_name=COLLECTIONS["faqs"],
-            query_vector={"default": query_vector},
-            limit=limit_per_collection,
-            with_payload=True
-        )
-        
+            query= query_vector,
+            using="default",
+            limit=limit_per_collection,    
+            with_payload=True,
+            with_vectors=False,
+            )
+
         for faq in faq_results:
-            contexts.append(f"FAQ INFORMATION:\n{faq.payload.get('text_content', '')}")
+            # print("😒👍👍😒😒❤️🤣😁😉😎faq", faq[1])
+            # print("👽💀😊👽", faq[1][0])
+            # print(type(faq[1][0]))
+            # try:
+            #     print("👽💀😊👽", faq[1][0].payload.get('text_content', ''))
+            # except:
+            #     print("👽💀👽", faq[1][0][2])
+            contexts.append(f"FAQ INFORMATION:\n{faq[1][0].payload.get('text_content', '')}")   
         
         # Search categories (for category-related questions)
-        category_results = qdrant.search(
+        # category_results = qdrant.search(
+        #     collection_name=COLLECTIONS["categories"],
+        #     query_vector={"default": query_vector},
+        #     limit=1,  # We don't need many categories
+        #     with_payload=True
+        # )
+        category_results = qdrant.query_points(
             collection_name=COLLECTIONS["categories"],
-            query_vector={"default": query_vector},
-            limit=1,  # We don't need many categories
-            with_payload=True
+            query= query_vector,
+            using="default",
+            limit=limit_per_collection,
+            with_payload=True,
+            with_vectors=False,
         )
         
         for category in category_results:
-            contexts.append(f"CATEGORY INFORMATION:\n{category.payload.get('text_content', '')}")
+            contexts.append(f"CATEGORY INFORMATION:\n{category[1][0].payload.get('text_content', '')}")
         
         # Join all contexts
         all_context = "\n\n".join(contexts)
@@ -189,3 +220,5 @@ def generate_product_recommendations_from_chat(chat_text: str, limit: int = 5) -
     except Exception as e:
         print(f"⚠️ Error generating product recommendations from chat: {e}")
         return [] 
+    
+# print(retrieve_relevant_context("chính sách bảo hành"))

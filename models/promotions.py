@@ -36,7 +36,7 @@ class Promotion(Base, TimestampMixin):
     
     # Relationships
     shop = relationship("Shop", back_populates="promotions")
-    product = relationship("Product", back_populates="promotions")
+    # product = relationship("Product", back_populates="promotions")
     category = relationship("Category", back_populates="promotions")
 
 

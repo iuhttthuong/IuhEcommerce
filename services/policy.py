@@ -12,9 +12,10 @@ class PolicyService:
         Process a policy-related message and return relevant information.
         """
         try:
+            # print("😒👍👍😒😒❤️🤣😁😉😎payload.content", payload.content)
             # Get relevant context from the message
             context = retrieve_relevant_context(payload.content)
-            
+            # print("😒👍👍😒😒❤️🤣😁😉😎context", context)
             # Search for policy-related information
             search_results = SearchServices.search(
                 payload=payload.content,

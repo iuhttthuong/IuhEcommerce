@@ -77,8 +77,7 @@ init_collections()
 
 class SearchRepository:
     @staticmethod
-    def semantic_search( query: str, collection_name: str = "product_embeddings", limit: int = 5):
-        print("❤️❤️❤️❤️❤️query:", query)
+    def semantic_search(query: str, collection_name: str = "product_embeddings", limit: int = 5):
         """
         Vector search sản phẩm trên Qdrant (chuẩn, có vector_name).
         Args:
@@ -88,50 +87,36 @@ class SearchRepository:
         Returns:
             List[dict]: Danh sách sản phẩm phù hợp.
         """
-        # try:
-        #     query_vector = generate_embedding(query)
-        #     if query_vector is None:
-        #         logger.error("Không tạo được embedding cho truy vấn")
-        #         return []
+        try:
+            query_vector = generate_embedding(query)
+            if query_vector is None:
+                logger.error("Không tạo được embedding cho truy vấn")
+                return []
 
-            # search_result = qdrant.search(
-            #     collection_name=collection_name,
-            #     query_vector=query_vector,
-            #     limit=limit,
-            #     score_threshold=score_threshold,
-            #     with_payload=True,
-            #     search_params=qdrant_models.SearchParams(
-            #         hnsw_ef=128,
-            #         exact=False
-            #     )
-            # )
-        search_result = qdrant.query_points(
-            collection_name=collection_name,
-            query = generate_embedding(query),
-            using = "default",
-            limit=limit,
-            with_payload=True,
-            with_vectors=False
-        )
+            search_result = qdrant.query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                using="default",
+                limit=limit,
+                with_payload=True,
+                with_vectors=False
+            )
 
-            # results = []
-            # for hit in search_result:
-            #     if hit.score >= 0.7:
-            #         product_info = ProductRepositories.get_info(hit.id)
-            #         if product_info and product_info.get("product"):
-            #             product = product_info["product"]
-            #             results.append({
-            #                 "id": hit.id,
-            #                 "score": hit.score,
-            #                 "name": product.name,
-            #                 "description": product.description,
-            #                 "price": product.price,
-            #             })
-        return search_result
+            # Chuyển đổi kết quả từ QueryResponse thành list
+            results = []
+            for point in search_result.points:
+                if point.score >= 0.7:  # Chỉ lấy kết quả có độ tương đồng cao
+                    results.append({
+                        "id": point.id,
+                        "score": point.score,
+                        "payload": point.payload
+                    })
 
-        # except Exception as e:
-        #     logger.error(f"Lỗi khi vector search: {e}")
-        #     return []
+            return results
+
+        except Exception as e:
+            logger.error(f"Lỗi khi vector search: {e}")
+            return []
 
     @staticmethod
     def upsert_product(product_id: int, product_name: str, description: str, category: str = None):

@@ -2,9 +2,7 @@ from typing import Dict, Any, Optional
 from .base import BaseShopAgent, ShopChatRequest, ShopChatResponse
 from .product_management import ProductManagementAgent
 from .inventory import InventoryAgent
-from .order import OrderAgent
 from .marketing import MarketingAgent
-from .finance import FinanceAgent
 from .analytics import AnalyticsAgent
 from .customer_service import CustomerServiceAgent
 from .policy import PolicyAgent
@@ -15,9 +13,7 @@ class ShopOrchestrator(BaseShopAgent):
         self.agents = {
             "product": ProductManagementAgent(shop_id),
             "inventory": InventoryAgent(shop_id),
-            "order": OrderAgent(shop_id),
             "marketing": MarketingAgent(shop_id),
-            "finance": FinanceAgent(shop_id),
             "analytics": AnalyticsAgent(shop_id),
             "customer_service": CustomerServiceAgent(shop_id),
             "policy": PolicyAgent(shop_id)
