@@ -1,212 +1,224 @@
-from fastapi import HTTPException, APIRouter, Depends
-from autogen import AssistantAgent
-from loguru import logger
-from .base import config_list, ShopRequest
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
-from db import Session, get_db
-from models.shops import Shop
-from repositories.policies import PolicyRepository
+import os, json, dotenv
+from autogen import AssistantAgent, ConversableAgent
+import uuid
+from db import Session
+from models.fqas import FQA
+from repositories.message import MessageRepository
+from controllers.search import search
+import traceback
+from models.chats import ChatMessageCreate
+from autogen import register_function
+from env import env
+from services.policy import PolicyService
+from embedding.main import COLLECTIONS
+import logging
+from services.search import SearchServices
+from typing import Optional, Dict, Any, List
+from .base import BaseShopAgent, ShopRequest, ChatMessageRequest
 from datetime import datetime
+from loguru import logger
+
+logger = logging.getLogger(__name__)
+
+# Lấy cấu hình model từ môi trường
+config_list = [
+    {
+        "model": "gpt-4o-mini",
+        "api_key": env.OPENAI_API_KEY,
+        "api_type": "openai"
+    }
+]
+
+class AgentMessage(BaseModel):
+    agent_id: str
+    agent_type: str
+    content: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class ChatbotRequest(BaseModel):
+    chat_id: int
+    message: str
+    context: Optional[dict] = None
+    user_id: Optional[int] = None
+    shop_id: Optional[int] = None
+    entities: Optional[Dict[str, Any]] = None
+    agent_messages: Optional[List[AgentMessage]] = None
+    filters: Optional[Dict[str, Any]] = None
 
 router = APIRouter(prefix="/shop/policy", tags=["Shop Policy"])
 
-class PolicyRequest(BaseModel):
-    shop_id: int
-    policy_type: str  # e.g., "return", "shipping", "payment", "warranty"
-    context: Optional[Dict[str, Any]] = None
+OPTIMAL_SYSTEM_MESSAGE = '''
+Bạn là chuyên gia AI về chính sách cho sàn thương mại điện tử IUH-Ecommerce, chuyên tư vấn, giải thích, hướng dẫn chi tiết cho người bán về mọi chính sách, quy định, thủ tục của sàn.
 
-class PolicyResponse(BaseModel):
-    policy_info: Dict[str, Any]
-    explanation: str
+YÊU CẦU:
+- Luôn ưu tiên sử dụng thông tin chính sách từ hệ thống (FAQ, embedding, context, luật mới nhất) để trả lời.
+- Nếu context chưa đủ, hãy hỏi lại để lấy thêm thông tin hoặc chủ động tìm kiếm web, nhưng phải giải thích rõ nguồn và liên hệ thực tế với shop.
+- Trả lời chi tiết, đúng trọng tâm, có ví dụ, hướng dẫn từng bước nếu cần.
+- Ưu tiên lợi ích người bán, nhưng luôn đảm bảo tuân thủ quy định sàn.
+- Không trả lời chung chung, không lý thuyết suông.
 
-class PolicyAgent:
-    def __init__(self):
-        self.agent = AssistantAgent(
-            name="policy_management_agent",
-            system_message="""Bạn là một trợ lý AI chuyên về quản lý chính sách và tuân thủ cho shop trên sàn thương mại điện tử IUH-Ecomerce.
-            Nhiệm vụ của bạn là:
-            1. Quản lý chính sách shop
-            2. Đảm bảo tuân thủ quy định
-            3. Xử lý khiếu nại và tranh chấp
-            4. Tư vấn chính sách bảo hành
-            5. Hướng dẫn quy trình giải quyết vấn đề
-            
-            Bạn cần đảm bảo:
-            - Tuân thủ đúng quy định của sàn
-            - Xử lý công bằng và minh bạch
-            - Bảo vệ quyền lợi của cả shop và người mua
-            - Cập nhật kịp thời các thay đổi chính sách
-            """,
-            llm_config={"config_list": config_list},
-            human_input_mode="NEVER"
+CẤU TRÚC TRẢ LỜI (nên tham khảo):
+1. Tóm tắt chính sách liên quan
+2. Điều kiện & quy định
+3. Quy trình thực hiện
+4. Lưu ý quan trọng
+5. Khuyến nghị cho shop
+'''
+
+class PolicyAgent(BaseShopAgent):
+    def __init__(self, shop_id: int = None):
+        super().__init__(
+            shop_id=shop_id,
+            name="PolicyAgent",
+            system_message=OPTIMAL_SYSTEM_MESSAGE
         )
-        self.policy_repository = PolicyRepository()
+        self.message_repository = MessageRepository()
+        self.agent_name = "PolicyAgent"
 
-    async def process_request(self, request: ShopRequest):
+    async def process(self, request: ShopRequest) -> Dict[str, Any]:
         try:
-            # Get response from agent
-            response = await self.agent.a_generate_reply(
-                messages=[{"role": "user", "content": request.message}]
+            query = request.message
+            logger.info(f"PolicyAgent received query: {query}")
+
+            # Lưu tin nhắn vào DB
+            message_payload = ChatMessageCreate(
+                chat_id=request.chat_id if hasattr(request, 'chat_id') else 0,
+                sender_type="user",
+                sender_id=0,
+                content=query
             )
-            
-            # Parse the response to determine the action
-            action = self._parse_action(response)
-            
-            # Execute the appropriate action
-            if action["type"] == "policy":
-                return await self._get_shop_policy(request.shop_id)
-            elif action["type"] == "compliance":
-                return await self._check_compliance(action["data"], request.shop_id)
-            elif action["type"] == "dispute":
-                return await self._handle_dispute(action["data"], request.shop_id)
-            elif action["type"] == "warranty":
-                return await self._get_warranty_info(action["data"], request.shop_id)
+            self.message_repository.create_message(message_payload)
+
+            # Semantic search context chính sách
+            search_results = SearchServices.search(query, collection_name="faq_embeddings", limit=5)
+            logger.info(f"PolicyAgent search results: {search_results}")
+
+            # Tổng hợp context ưu tiên answer/text_content
+            context_list = []
+            if search_results and isinstance(search_results[0], dict):
+                for result in search_results:
+                    payload = result.get("payload", {})
+                    answer = payload.get("answer", "")
+                    text_content = payload.get("text_content", "")
+                    if answer:
+                        context_list.append(f"- {answer}")
+                    elif text_content:
+                        context_list.append(f"- {text_content}")
+            context = "\n".join(context_list)
+
+            # Nếu context yếu hoặc chỉ có 1 câu trả lời ngắn, ép LLM phân tích sâu và chủ động search web
+            need_web = False
+            if not context or len(context) < 30 or (len(context_list) == 1 and len(context_list[0]) < 80):
+                need_web = True
+
+            web_results = None
+            if need_web:
+                from functions import web_search
+                try:
+                    web_results = web_search(
+                        search_term=f"{query} site:gov.vn OR site:moit.gov.vn OR site:luatvietnam.vn OR site:baochinhphu.vn",
+                        explanation="Tìm kiếm thông tin chính sách mới nhất, chuyên sâu từ các nguồn uy tín để bổ sung cho câu trả lời."
+                    )
+                except Exception as e:
+                    logger.warning(f"Web search failed: {e}")
+                    web_results = None
+
+            if not context or len(context) < 30:
+                response_content = (
+                    "Xin lỗi, tôi chưa tìm thấy thông tin chính sách phù hợp với câu hỏi của bạn trong hệ thống. "
+                    "Dưới đây là thông tin tôi thu thập được từ các nguồn bên ngoài:\n"
+                    f"{web_results.results if web_results and hasattr(web_results, 'results') else web_results}"
+                )
             else:
-                return {"message": "Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."}
-                
-        except Exception as e:
-            logger.error(f"Error in PolicyAgent: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+                # Tạo prompt cho LLM
+                prompt = (
+                    f"Câu hỏi của người bán: {query}\n"
+                    "Dưới đây là các chính sách thực tế của các sàn thương mại điện tử lớn tại Việt Nam (Shopee, Lazada, Tiki, ...), bạn hãy tổng hợp, so sánh, và trả lời như chính sách của IUH-Ecommerce, ưu tiên lợi ích người bán, nhưng đảm bảo tuân thủ quy định chung:\n"
+                    f"{context}\n"
+                )
+                if need_web and web_results:
+                    prompt += f"\nKết quả tìm kiếm web liên quan: {web_results.results if hasattr(web_results, 'results') else web_results}\n"
+                prompt += (
+                    "---\n"
+                    "Hãy trả lời thật chuyên sâu, phân tích kỹ, mở rộng, lấy ví dụ thực tế, hướng dẫn từng bước nếu cần. Nếu phải dùng thông tin ngoài, hãy giải thích rõ nguồn và liên hệ thực tế với shop."
+                )
+                # response_content = call_gpt4o_mini(self.system_message, prompt)
+                response_content = "[GPT-4o-mini trả lời ở đây: tổng hợp, so sánh chính sách các sàn lớn, trả lời như IUH-Ecommerce]"  # Placeholder
 
-    def _parse_action(self, response):
-        try:
-            data = json.loads(response)
-            return {
-                "type": data.get("action", "unknown"),
-                "data": data.get("data", {})
-            }
-        except:
-            return {"type": "unknown", "data": {}}
-
-    async def _get_shop_policy(self, shop_id):
-        try:
-            # Get shop policies
-            policies = await self.policy_repository.get_shop_policies(shop_id)
-            
-            return {
-                "policies": {
-                    "return_policy": policies.return_policy,
-                    "shipping_policy": policies.shipping_policy,
-                    "warranty_policy": policies.warranty_policy,
-                    "payment_policy": policies.payment_policy,
-                    "last_updated": policies.last_updated
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error getting shop policies: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def _check_compliance(self, data, shop_id):
-        try:
-            # Check compliance with platform policies
-            compliance_report = await self.policy_repository.check_compliance(
-                shop_id=shop_id,
-                policy_type=data.get("policy_type"),
-                check_items=data.get("check_items", [])
+            # Lưu phản hồi vào DB
+            response_payload = ChatMessageCreate(
+                chat_id=request.chat_id if hasattr(request, 'chat_id') else 0,
+                sender_type="assistant",
+                sender_id=0,
+                content=response_content
             )
-            
+            self.message_repository.create_message(response_payload)
+
+            formatted_response = {
+                "title": f"Chính sách liên quan đến: {query[:30]}...",
+                "content": response_content,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
             return {
-                "compliance_report": {
-                    "status": compliance_report.status,
-                    "violations": compliance_report.violations,
-                    "warnings": compliance_report.warnings,
-                    "recommendations": compliance_report.recommendations,
-                    "checked_at": datetime.now()
-                }
+                "response": formatted_response,
+                "agent": self.agent_name,
+                "context": {
+                    "search_results": search_results if 'search_results' in locals() else [],
+                    "shop_id": request.shop_id if hasattr(request, 'shop_id') else None,
+                    "web_results": web_results
+                },
+                "timestamp": datetime.now().isoformat()
             }
         except Exception as e:
-            logger.error(f"Error checking compliance: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def _handle_dispute(self, data, shop_id):
-        try:
-            # Handle customer dispute
-            dispute_result = await self.policy_repository.handle_dispute(
-                shop_id=shop_id,
-                dispute_id=data.get("dispute_id"),
-                action=data.get("action"),
-                resolution=data.get("resolution")
-            )
-            
+            logger.error(f"Error in PolicyAgent.process: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            error_message = "Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ shop."
             return {
-                "dispute": {
-                    "dispute_id": dispute_result.dispute_id,
-                    "status": dispute_result.status,
-                    "resolution": dispute_result.resolution,
-                    "resolved_at": dispute_result.resolved_at,
-                    "notes": dispute_result.notes
-                }
+                "response": {
+                    "title": "Lỗi xử lý yêu cầu",
+                    "content": error_message,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                },
+                "agent": self.agent_name,
+                "context": {},
+                "timestamp": datetime.now().isoformat()
             }
-        except Exception as e:
-            logger.error(f"Error handling dispute: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
 
-    async def _get_warranty_info(self, data, shop_id):
-        try:
-            # Get warranty information
-            warranty_info = await self.policy_repository.get_warranty_info(
-                shop_id=shop_id,
-                product_id=data.get("product_id")
-            )
-            
-            return {
-                "warranty": {
-                    "product_id": warranty_info.product_id,
-                    "warranty_period": warranty_info.warranty_period,
-                    "warranty_terms": warranty_info.warranty_terms,
-                    "coverage": warranty_info.coverage,
-                    "exclusions": warranty_info.exclusions,
-                    "claim_process": warranty_info.claim_process
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error getting warranty info: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-# Add router endpoints
-@router.post("/query", response_model=PolicyResponse)
-async def query_policy(request: PolicyRequest, db: Session = Depends(get_db)):
+@router.post("/query")
+async def query_policy(request: ChatMessageRequest):
     try:
-        # Get shop information
-        shop = db.query(Shop).filter(Shop.seller_id == request.shop_id).first()
-        if not shop:
-            raise HTTPException(status_code=404, detail="Shop not found")
-        
-        # Prepare context
-        context = request.context or {}
-        context.update({
-            "shop_info": {
-                "seller_id": shop.seller_id,
-                "name": shop.name
-            },
-            "policy_type": request.policy_type
-        })
-        
-        # Create the message for the assistant
-        message = {
-            "role": "user",
-            "content": f"""
-            Context: {context}
-            Please provide information about the {request.policy_type} policy for this shop.
-            """
-        }
-        
-        # Get response from the assistant
-        response = await PolicyAssistant.a_generate_reply(messages=[message])
-        
-        # Parse the response to extract policy information and explanation
-        policy_info = {
-            "shop_id": shop.seller_id,
-            "shop_name": shop.name,
-            "policy_type": request.policy_type
-        }
-        
-        return PolicyResponse(
-            policy_info=policy_info,
-            explanation=response
+        agent = PolicyAgent(shop_id=request.sender_id if request.sender_type == "shop" else None)
+        shop_request = ShopRequest(
+            message=request.content,
+            chat_id=request.chat_id,
+            shop_id=request.sender_id if request.sender_type == "shop" else None,
+            user_id=None,
+            context=request.message_metadata if request.message_metadata else {},
+            entities={},
+            agent_messages=[],
+            filters={}
         )
-        
+        response = await agent.process(shop_request)
+        return response
     except Exception as e:
-        logger.error(f"Error in policy query: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        logger.error(f"Error in query_policy: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def search_faq(query: str, limit: int = 1):
+    results = SearchServices.search(query, collection_name="faq_embeddings", limit=limit)
+    if results and isinstance(results[0], dict):
+        payload = results[0].get("payload")
+        if payload and "answer" in payload:
+            return payload["answer"]
+    return "Xin lỗi, tôi không tìm thấy thông tin liên quan đến câu hỏi của bạn."
+
+def get_fqa(payload: str, collection_name: str = "faq_embeddings", limit: int = 1):
+    return search_faq(payload, limit)
+
+@router.get("/faq")
+def get_policy_faq(query: str, limit: int = 1):
+    answer = search_faq(query, limit)
+    return {"answer": answer} 

@@ -26,3 +26,7 @@ def update_customer(customer_id: int, payload: UpdateCustomerPayload):
 def delete_customer(customer_id: int):
     CustomerService.delete_customer(customer_id)
     return {"message": "Customer deleted successfully"}
+
+@router.post("check/{customer_id}")
+def check_customer(customer_id: int):
+    return CustomerService.check_customer(customer_id)

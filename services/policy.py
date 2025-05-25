@@ -12,29 +12,25 @@ class PolicyService:
         Process a policy-related message and return relevant information.
         """
         try:
-            # print("😒👍👍😒😒❤️🤣😁😉😎payload.content", payload.content)
-            # Get relevant context from the message
+            # Lấy context liên quan
             context = retrieve_relevant_context(payload.content)
-            # print("😒👍👍😒😒❤️🤣😁😉😎context", context)
-            # Search for policy-related information
+            # Tìm kiếm thông tin chính sách liên quan
             search_results = SearchServices.search(
                 payload=payload.content,
                 collection_name=COLLECTIONS["faqs"],
                 limit=3
             )
-            
-            # Generate response using chat completion with context
-            response = chat_completion_with_context(payload.content, context)
-            
+            # Sinh trả lời với prompt tối ưu (đã chỉnh ở chatbot.py)
+            response = chat_completion_with_context(payload.content)
             return {
-                "response": response.get("response", "I couldn't find relevant policy information."),
+                "response": response.get("response", "Xin lỗi, tôi không tìm thấy thông tin chính sách phù hợp."),
                 "policy_info": search_results.get("results", []),
                 "context": context
             }
         except Exception as e:
             logger.error(f"Error processing policy message: {str(e)}")
             return {
-                "response": "I apologize, but I encountered an error processing your policy-related request.",
+                "response": "Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn.",
                 "policy_info": [],
                 "context": []
             }

@@ -165,9 +165,14 @@ class SearchDiscoveryAgent:
         # Hiển thị 3 sản phẩm đầu tiên
         displayed_products = products[:3]
         for i, product in enumerate(displayed_products):
-            response += f"{i+1}. {product.get('name')} - {product.get('price', 0):,} VNĐ"
-            if product.get("rating"):
-                response += f" (⭐ {product.get('rating')})"
+            product_data = product.get('payload', {})
+            name = product_data.get('name', 'Không có tên')
+            price = product_data.get('price', 0)
+            rating = product_data.get('rating_average', 0)
+            
+            response += f"{i+1}. {name} - {price:,} VNĐ"
+            if rating:
+                response += f" (⭐ {rating})"
             response += "\n"
             
         if len(products) > 3:
@@ -203,7 +208,7 @@ class SearchDiscoveryAgent:
                     "result_count": len(results)
                 }
             )
-            MessageRepository.create_message(message_payload)
+            # MessageRepository.create_message(message_payload)
 
             return SearchResponse(
                 content=response_content,

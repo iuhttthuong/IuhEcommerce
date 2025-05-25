@@ -4,8 +4,14 @@ from db import get_db
 from models.chats import ChatCreate, ChatMessageCreate, ChatResponse, ChatMessageResponse
 from services.chat import ChatService
 from controllers.manager import ask_chatbot, ChatbotRequest
-from shop_chat.chat import process_shop_chat, ShopChatRequest, ShopChatResponse
-from typing import Dict, Any
+from shop_chat.chat import process_shop_chat
+from repositories.message import MessageRepository
+from shop_chat.base import ShopRequest, ChatMessageRequest
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chats", tags=["Chats"])
 
@@ -32,11 +38,15 @@ async def process_message(payload: ChatMessageCreate, db: Session = Depends(get_
         
         if payload.sender_type == "shop":
             # Process shop chat
-            shop_request = ShopChatRequest(
-                shop_id=payload.sender_id,
+            shop_request = ShopRequest(
                 message=payload.content,
+                chat_id=chat.chat_id,
+                shop_id=payload.sender_id,
                 user_id=None,
-                context={}
+                context={},
+                entities={},
+                agent_messages=[],
+                filters={}
             )
             
             # Process using shop chat
@@ -47,15 +57,10 @@ async def process_message(payload: ChatMessageCreate, db: Session = Depends(get_
                 chat_id=chat.chat_id,
                 sender_type="shop",
                 sender_id=payload.sender_id,
-                content=response.response
+                content=response["response"]["content"]
             ))
             
-            return {
-                "response": response.response,
-                "agent": response.agent,
-                "timestamp": response.timestamp,
-                "context": response.context
-            }
+            return response
         else:
             # Process customer chat
             chatbot_request = ChatbotRequest(
@@ -80,7 +85,7 @@ async def process_message(payload: ChatMessageCreate, db: Session = Depends(get_
             
     except Exception as e:
         # Log the error
-        print(f"Error processing chat message: {str(e)}")
+        logger.error(f"Error processing chat message: {str(e)}")
         # Return a friendly error message
         return {
             "message": "Xin lỗi, đã có lỗi xảy ra khi xử lý tin nhắn của bạn. Vui lòng thử lại sau.",
@@ -123,3 +128,37 @@ def get_chat_by_shop_id(shop_id: int, db: Session = Depends(get_db)):
     service = ChatService(db)
     chats = service.get_chat_by_shop_id(shop_id)
     return chats
+
+@router.post("/customer/chat/chats/message")
+async def create_chat_message(request: ChatMessageRequest, db: Session = Depends(get_db)):
+    try:
+        # Convert to ShopRequest format
+        shop_request = ShopRequest(
+            message=request.content,
+            chat_id=request.chat_id,
+            shop_id=request.sender_id if request.sender_type == "shop" else None,
+            user_id=request.sender_id if request.sender_type == "user" else None,
+            context=request.message_metadata if request.message_metadata else {},
+            entities={},
+            agent_messages=[],
+            filters={}
+        )
+        
+        # Process the request
+        response = await process_shop_chat(shop_request)
+        
+        # Save the message to database
+        message_repository = MessageRepository()
+        message = ChatMessageCreate(
+            chat_id=request.chat_id,
+            sender_type=request.sender_type,
+            sender_id=request.sender_id,
+            content=request.content,
+            message_metadata=request.message_metadata
+        )
+        message_repository.create_message(message)
+        
+        return response
+    except Exception as e:
+        logger.error(f"Error in create_chat_message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

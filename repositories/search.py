@@ -29,44 +29,32 @@ def init_collections():
         collection_names = [collection.name for collection in collections]
         
         # Create products collection if it doesn't exist
-        if "products" not in collection_names:
+        if "product_embeddings" not in collection_names:
             qdrant.create_collection(
                 collection_name="product_embeddings",
                 vectors_config={
                     "default": qdrant_models.VectorParams(
                         size=3072,  # OpenAI embedding dimension
                         distance=qdrant_models.Distance.COSINE,
-                        on_disk=True,  # Store vectors on disk to save memory
-                        hnsw_config=qdrant_models.HnswConfig(
-                            m=16,  # Number of connections per element
-                            ef_construct=100,  # Size of the dynamic candidate list
-                            full_scan_threshold=10000,  # Use HNSW for collections smaller than this
-                            max_indexing_threads=4,  # Number of threads for index building
-                            on_disk=True  # Store index on disk
-                        )
+                        on_disk=True  # Store vectors on disk to save memory
                     )
                 }
             )
-            logger.info("Created collection: products with HNSW index")
+            logger.info("Created collection: product_embeddings")
             
         # Create categories collection if it doesn't exist
-        if "categories" not in collection_names:
+        if "category_embeddings" not in collection_names:
             qdrant.create_collection(
                 collection_name="category_embeddings",
-                vectors_config=qdrant_models.VectorParams(
-                    size=3072,  # OpenAI embedding dimension
-                    distance=qdrant_models.Distance.COSINE,
-                    on_disk=True,  # Store vectors on disk to save memory
-                    hnsw_config=qdrant_models.HnswConfig(
-                        m=16,
-                        ef_construct=100,
-                        full_scan_threshold=10000,
-                        max_indexing_threads=4,
-                        on_disk=True
+                vectors_config={
+                    "default": qdrant_models.VectorParams(
+                        size=3072,  # OpenAI embedding dimension
+                        distance=qdrant_models.Distance.COSINE,
+                        on_disk=True  # Store vectors on disk to save memory
                     )
-                )
+                }
             )
-            logger.info("Created collection: categories with HNSW index")
+            logger.info("Created collection: category_embeddings")
             
     except Exception as e:
         logger.error(f"Error initializing collections: {e}")

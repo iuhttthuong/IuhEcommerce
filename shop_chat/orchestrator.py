@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional
-from .base import BaseShopAgent, ShopChatRequest, ShopChatResponse
+from .base import BaseShopAgent, ShopRequest, ShopChatRequest
 from .product_management import ProductManagementAgent
 from .inventory import InventoryAgent
 from .marketing import MarketingAgent
@@ -19,57 +19,45 @@ class ShopOrchestrator(BaseShopAgent):
             "policy": PolicyAgent(shop_id)
         }
 
-    async def process(self, request: ShopChatRequest) -> ShopChatResponse:
-        # Analyze the message to determine which agent should handle it
+    async def process(self, request: ShopChatRequest) -> Dict[str, Any]:
         intent = self._analyze_intent(request.message)
-        
         if intent in self.agents:
-            # Route to specialized agent
-            return await self.agents[intent].process(request)
+            # Convert ShopChatRequest to ShopRequest for agent
+            shop_request = ShopRequest(
+                message=request.message,
+                chat_id=request.chat_id,
+                shop_id=request.shop_id,
+                user_id=request.user_id,
+                context=request.context,
+                entities=request.entities,
+                agent_messages=request.agent_messages,
+                filters=request.filters
+            )
+            return await self.agents[intent].process(shop_request)
         else:
-            # Default response if no specific intent is detected
             return self._create_response(
                 "Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại với một yêu cầu cụ thể hơn.",
                 {"intent": "unknown"}
             )
 
     def _analyze_intent(self, message: str) -> str:
-        """
-        Analyze the message to determine which agent should handle it
-        Returns the name of the appropriate agent
-        """
         message = message.lower()
-        
         # Product management intent
         if any(word in message for word in ["sản phẩm", "thêm sản phẩm", "cập nhật sản phẩm", "xóa sản phẩm"]):
             return "product"
-            
         # Inventory intent
         if any(word in message for word in ["tồn kho", "kiểm kho", "nhập kho", "xuất kho"]):
             return "inventory"
-            
-        # Order intent
-        if any(word in message for word in ["đơn hàng", "xác nhận đơn", "hủy đơn", "giao hàng"]):
-            return "order"
-            
         # Marketing intent
         if any(word in message for word in ["khuyến mãi", "giảm giá", "quảng cáo", "marketing"]):
             return "marketing"
-            
-        # Finance intent
-        if any(word in message for word in ["doanh thu", "chi phí", "thanh toán", "tài chính"]):
-            return "finance"
-            
         # Analytics intent
         if any(word in message for word in ["báo cáo", "thống kê", "phân tích", "dashboard"]):
             return "analytics"
-            
         # Customer service intent
         if any(word in message for word in ["khách hàng", "phản hồi", "đánh giá", "khiếu nại"]):
             return "customer_service"
-            
         # Policy intent
         if any(word in message for word in ["chính sách", "quy định", "điều khoản", "hướng dẫn"]):
             return "policy"
-            
         return "unknown" 

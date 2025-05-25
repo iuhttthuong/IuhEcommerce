@@ -1,11 +1,14 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
-from datetime import datetime
+import os, json
 from autogen import AssistantAgent, ConversableAgent
 from env import env
-import json
-from .base import ShopChatRequest, ShopChatResponse, process_shop_chat
+from .base import ShopRequest, ChatMessageRequest, process_shop_chat
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/shop/chat", tags=["Shop Chat"])
 
@@ -69,12 +72,25 @@ product_agent = ProductManagementAgent()
 inventory_agent = InventoryAgent()
 order_agent = OrderAgent()
 
-@router.post("/ask", response_model=ShopChatResponse)
-async def ask_shop_chat(request: ShopChatRequest):
-    """
-    Endpoint to handle shop-related chat queries
-    """
-    return await process_shop_chat(request)
+@router.post("/query")
+async def query_shop_chat(request: ChatMessageRequest):
+    try:
+        # Convert to ShopRequest format
+        shop_request = ShopRequest(
+            message=request.content,
+            chat_id=request.chat_id,
+            shop_id=request.sender_id if request.sender_type == "shop" else None,
+            user_id=request.sender_id if request.sender_type == "user" else None,
+            context=request.message_metadata if request.message_metadata else {},
+            entities={},
+            agent_messages=[],
+            filters={}
+        )
+        response = await process_shop_chat(shop_request)
+        return response
+    except Exception as e:
+        logger.error(f"Error in query_shop_chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/agents")
 async def list_available_agents():

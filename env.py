@@ -32,6 +32,7 @@ class Env(BaseModel):
     CHAT_FE_BASE_URL: str
     DOMAIN: str
     GROQ_API_KEY: str
+    JWT_SECRET : str
     class Config:
         env_file = ".env"
     

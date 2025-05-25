@@ -52,10 +52,30 @@ class MessageRepository:
                 .all()
 
     @staticmethod
-    def get_all_messages_in_chat(chat_id: int) -> list[ChatMessageResponse]:
+    def get_all_messages_in_chat(chat_id: int, limit = 0 ) -> list[MessageModel]:
         with Session() as session:
-            result = session.query(ChatMessage)\
+            messages = session.query(ChatMessage)\
                 .filter(ChatMessage.chat_id == chat_id)\
-                .order_by(ChatMessage.created_at.asc())\
+                .order_by(ChatMessage.created_at.desc())\
+                .limit(limit)\
                 .all()
-            return [ChatMessageResponse.model_validate(msg) for msg in result]
+
+            rs = [MessageModel.model_validate(message) for message in messages]
+            return rs[::-1] if rs else []
+
+    @staticmethod
+    def get_sender_type_and_content(chat_id: int, limit=30) -> list[dict]:
+        with Session() as session:
+            query = session.query(
+                ChatMessage.sender_type,
+                ChatMessage.content
+            ).filter(
+                ChatMessage.chat_id == chat_id
+            ).order_by(
+                ChatMessage.created_at.desc()
+            )
+            if limit:
+                query = query.limit(limit)
+            results = query.all()
+            # Trả về dạng list[dict]
+            return [{"sender_type": sender_type, "content": content} for sender_type, content in results][::-1]

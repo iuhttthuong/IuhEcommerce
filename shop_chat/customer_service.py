@@ -1,213 +1,140 @@
-from fastapi import HTTPException, APIRouter
+from fastapi import APIRouter, HTTPException
 from autogen import AssistantAgent
 from loguru import logger
-from .base import config_list, ShopChatRequest, ShopChatResponse, BaseShopAgent
-from repositories.customer_service import CustomerServiceRepository
-from datetime import datetime
+from .base import BaseShopAgent, ShopRequest, ChatMessageRequest
+from repositories.message import MessageRepository
+from models.chats import ChatMessageCreate
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 from sqlalchemy.orm import Session
+from services.search import SearchServices
+import traceback
 
 router = APIRouter(prefix="/shop/customer-service", tags=["Shop Customer Service"])
 
 class CustomerServiceAgent(BaseShopAgent):
-    def __init__(self, shop_id: int, db: Session):
-        super().__init__(shop_id)
-        self.customer_service_repository = CustomerServiceRepository(db)
+    def __init__(self, shop_id: int = None):
+        super().__init__(
+            shop_id=shop_id,
+            name="CustomerServiceAgent",
+            system_message="""Bạn là một trợ lý AI chuyên nghiệp làm việc cho sàn thương mại điện tử IUH-Ecommerce, chuyên tư vấn và hướng dẫn cho người bán về dịch vụ khách hàng.
 
-    async def process(self, request: ShopChatRequest) -> ShopChatResponse:
-        try:
-            # Get response from agent
-            response = await self.agent.a_generate_reply(
-                messages=[{"role": "user", "content": request.message}]
-            )
-            
-            # Parse the response to determine the action
-            action = self._parse_action(response)
-            
-            # Execute the appropriate action
-            if action["type"] == "inquiry":
-                result = await self._handle_inquiry(action["data"], self.shop_id)
-            elif action["type"] == "support":
-                result = await self._handle_support(action["data"], self.shop_id)
-            elif action["type"] == "feedback":
-                result = await self._handle_feedback(action["data"], self.shop_id)
-            elif action["type"] == "product_advice":
-                result = await self._provide_product_advice(action["data"], self.shop_id)
-            else:
-                result = {"message": "Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại."}
-            
-            return self._create_response(result.get("message", str(result)))
-                
-        except Exception as e:
-            logger.error(f"Error in CustomerServiceAgent: {str(e)}")
-            return self._create_response(
-                "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
-                error=str(e)
-            )
+Nhiệm vụ của bạn:
+1. Tư vấn quản lý khách hàng
+2. Hướng dẫn xử lý khiếu nại
+3. Tư vấn chăm sóc khách hàng
+4. Đề xuất cải thiện dịch vụ
 
-    def _parse_action(self, response):
-        try:
-            data = json.loads(response)
-            return {
-                "type": data.get("action", "unknown"),
-                "data": data.get("data", {})
-            }
-        except:
-            return {"type": "unknown", "data": {}}
+Các chức năng chính:
+1. Quản lý khách hàng:
+   - Phân tích khách hàng
+   - Theo dõi tương tác
+   - Đánh giá mức độ hài lòng
+   - Xây dựng mối quan hệ
+   - Tăng trải nghiệm
 
-    async def _handle_inquiry(self, data, shop_id):
-        try:
-            # Handle customer inquiry
-            inquiry_result = await self.customer_service_repository.handle_inquiry(
-                shop_id=shop_id,
-                inquiry_type=data.get("inquiry_type"),
-                message=data.get("message"),
-                customer_id=data.get("customer_id")
-            )
-            
-            return {
-                "inquiry": {
-                    "inquiry_id": inquiry_result.inquiry_id,
-                    "status": inquiry_result.status,
-                    "response": inquiry_result.response,
-                    "handled_at": inquiry_result.handled_at,
-                    "follow_up_required": inquiry_result.follow_up_required
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error handling inquiry: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+2. Xử lý khiếu nại:
+   - Tiếp nhận khiếu nại
+   - Phân tích nguyên nhân
+   - Đề xuất giải pháp
+   - Theo dõi xử lý
+   - Đánh giá kết quả
 
-    async def _handle_support(self, data, shop_id):
-        try:
-            # Handle customer support request
-            support_result = await self.customer_service_repository.handle_support(
-                shop_id=shop_id,
-                support_type=data.get("support_type"),
-                issue=data.get("issue"),
-                customer_id=data.get("customer_id"),
-                order_id=data.get("order_id")
-            )
-            
-            return {
-                "support": {
-                    "support_id": support_result.support_id,
-                    "status": support_result.status,
-                    "resolution": support_result.resolution,
-                    "resolved_at": support_result.resolved_at,
-                    "satisfaction_rating": support_result.satisfaction_rating
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error handling support: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+3. Chăm sóc khách hàng:
+   - Tư vấn sản phẩm
+   - Hỗ trợ đặt hàng
+   - Giải đáp thắc mắc
+   - Xử lý vấn đề
+   - Tăng trải nghiệm
 
-    async def _handle_feedback(self, data, shop_id):
-        try:
-            # Handle customer feedback
-            feedback_result = await self.customer_service_repository.handle_feedback(
-                shop_id=shop_id,
-                feedback_type=data.get("feedback_type"),
-                rating=data.get("rating"),
-                comment=data.get("comment"),
-                customer_id=data.get("customer_id"),
-                order_id=data.get("order_id")
-            )
-            
-            return {
-                "feedback": {
-                    "feedback_id": feedback_result.feedback_id,
-                    "status": feedback_result.status,
-                    "response": feedback_result.response,
-                    "handled_at": feedback_result.handled_at,
-                    "improvement_actions": feedback_result.improvement_actions
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error handling feedback: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+4. Cải thiện dịch vụ:
+   - Phân tích phản hồi
+   - Đề xuất cải thiện
+   - Tối ưu quy trình
+   - Tăng hiệu quả
+   - Nâng cao chất lượng
 
-    async def _provide_product_advice(self, data, shop_id):
-        try:
-            # Provide product advice to customer
-            advice_result = await self.customer_service_repository.provide_product_advice(
-                shop_id=shop_id,
-                customer_id=data.get("customer_id"),
-                preferences=data.get("preferences"),
-                budget=data.get("budget"),
-                category=data.get("category")
-            )
-            
-            return {
-                "product_advice": {
-                    "recommendations": advice_result.recommendations,
-                    "reasoning": advice_result.reasoning,
-                    "alternatives": advice_result.alternatives,
-                    "provided_at": datetime.now()
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error providing product advice: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+Khi trả lời, bạn cần:
+- Tập trung vào lợi ích của người bán
+- Cung cấp hướng dẫn chi tiết
+- Đề xuất giải pháp tối ưu
+- Sử dụng ngôn ngữ chuyên nghiệp
+- Cung cấp ví dụ cụ thể
+- Nhấn mạnh các điểm quan trọng
+- Hướng dẫn từng bước khi cần"""
+        )
+        self.message_repository = MessageRepository()
+        self.collection_name = "customer_service_embeddings"
+        self.agent_name = "CustomerServiceAgent"
+
+    def _build_prompt(self, query: str, context: str) -> str:
+        return (
+            f"Người bán hỏi: {query}\n"
+            f"Thông tin dịch vụ khách hàng liên quan:\n{context}\n"
+            "Hãy trả lời theo cấu trúc sau:\n"
+            "1. Tóm tắt vấn đề:\n"
+            "   - Mục đích và phạm vi\n"
+            "   - Đối tượng áp dụng\n"
+            "   - Tầm quan trọng\n\n"
+            "2. Hướng dẫn chi tiết:\n"
+            "   - Các bước thực hiện\n"
+            "   - Yêu cầu cần thiết\n"
+            "   - Lưu ý quan trọng\n\n"
+            "3. Quy trình xử lý:\n"
+            "   - Các bước thực hiện\n"
+            "   - Thời gian xử lý\n"
+            "   - Tài liệu cần thiết\n\n"
+            "4. Tối ưu và cải thiện:\n"
+            "   - Cách tối ưu\n"
+            "   - Cải thiện hiệu quả\n"
+            "   - Tăng trải nghiệm\n\n"
+            "5. Khuyến nghị:\n"
+            "   - Giải pháp tối ưu\n"
+            "   - Cải thiện quy trình\n"
+            "   - Tăng hiệu quả\n\n"
+            "Trả lời cần:\n"
+            "- Chuyên nghiệp và dễ hiểu\n"
+            "- Tập trung vào lợi ích của người bán\n"
+            "- Cung cấp hướng dẫn chi tiết\n"
+            "- Đề xuất giải pháp tối ưu\n"
+            "- Cung cấp ví dụ cụ thể"
+        )
+
+    def _get_response_title(self, query: str) -> str:
+        return f"Dịch vụ khách hàng - {query.split()[0] if query else 'Hỗ trợ'}"
+
+    def _get_fallback_response(self) -> str:
+        return "Xin lỗi, tôi không thể tìm thấy thông tin chi tiết về vấn đề này. Vui lòng liên hệ bộ phận hỗ trợ shop để được tư vấn cụ thể hơn."
+
+    async def process(self, request: ShopRequest) -> Dict[str, Any]:
+        # Placeholder implementation. Replace with actual logic as needed.
+        return {
+            "response": {
+                "title": self._get_response_title(request.message),
+                "content": "Customer service processing not yet implemented.",
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            },
+            "agent": self.name,
+            "context": {
+                "search_results": [],
+                "shop_id": request.shop_id
+            },
+            "timestamp": datetime.now().isoformat()
+        }
 
 class CustomerService:
     def __init__(self, db: Session):
         self.db = db
-        self.agent = CustomerServiceAgent(shop_id=1, db=db)  # Pass db to CustomerServiceAgent
-        self.customer_service_repository = CustomerServiceRepository(db)
-
-    async def create_customer(self, customer_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new customer"""
-        try:
-            customer = await self.customer_service_repository.create_customer(customer_data)
-            return customer
-        except Exception as e:
-            logger.error(f"Error creating customer: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def get_customer(self, customer_id: int) -> Dict[str, Any]:
-        """Get customer details"""
-        try:
-            customer = await self.customer_service_repository.get_customer(customer_id)
-            if not customer:
-                raise HTTPException(status_code=404, detail="Customer not found")
-            return customer
-        except Exception as e:
-            logger.error(f"Error getting customer: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def update_customer(self, customer_id: int, customer_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update customer information"""
-        try:
-            updated_customer = await self.customer_service_repository.update_customer(customer_id, customer_data)
-            return updated_customer
-        except Exception as e:
-            logger.error(f"Error updating customer: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def delete_customer(self, customer_id: int) -> Dict[str, Any]:
-        """Delete a customer"""
-        try:
-            await self.customer_service_repository.delete_customer(customer_id)
-            return {"message": "Customer deleted successfully"}
-        except Exception as e:
-            logger.error(f"Error deleting customer: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def get_total_customers(self) -> int:
-        """Get total number of customers"""
-        try:
-            return await self.customer_service_repository.get_total_customers()
-        except Exception as e:
-            logger.error(f"Error getting total customers: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
+        self.agent = CustomerServiceAgent()
 
     async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a customer service request"""
         try:
-            response = await self.agent.process_request(ShopChatRequest(**request))
-            return response.dict()
+            # Convert to ShopRequest format
+            shop_request = ShopRequest(**request)
+            response = await self.agent.process_request(shop_request)
+            return response
         except Exception as e:
             logger.error(f"Error processing request: {str(e)}")
             return {
@@ -216,8 +143,29 @@ class CustomerService:
                 "error": str(e)
             }
 
-# Add router endpoints
+@router.post("/query")
+async def query_customer_service(request: ChatMessageRequest):
+    try:
+        customer_service = CustomerService(Session())
+        # Convert to ShopRequest format
+        shop_request = ShopRequest(
+            message=request.content,
+            chat_id=request.chat_id,
+            shop_id=request.sender_id if request.sender_type == "shop" else None,
+            user_id=request.sender_id if request.sender_type == "user" else None,
+            context=request.message_metadata if request.message_metadata else {},
+            entities={},
+            agent_messages=[],
+            filters={}
+        )
+        response = await customer_service.process_request(shop_request.dict())
+        return response
+    except Exception as e:
+        logger.error(f"Error in query_customer_service: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/")
-async def get_customer_service_data():
-    """Get customer service data"""
-    return {"message": "Get customer service data endpoint"} 
+async def get_customer_service_info():
+    """Get customer service information"""
+    return {"message": "Get customer service info endpoint"} 

@@ -95,25 +95,27 @@ def ask_chatbot(request: ChatbotRequest):
         )
         message_repository.create_message(message_payload)
 
-        # Tìm kiếm thông tin
-        search_results = search_faq(message, limit=5)
+        # Tìm kiếm nhiều thông tin liên quan từ Qdrant
+        search_results = SearchServices.search(message, collection_name="faq_embeddings", limit=5)
         logger.info(f"Search results: {search_results}")
 
-        if search_results and search_results != "Xin lỗi, tôi không tìm thấy thông tin liên quan đến câu hỏi của bạn.":
-            # Tạo câu trả lời thân thiện
-            response_content = f"""Chào bạn! Rất vui được hỗ trợ bạn về chính sách của sàn thương mại điện tử IUH-Ecomerce. 
-
-Dựa trên thông tin tìm được, IUH-Ecomerce có các chính sách sau:
-
-1. Chính sách hoạt động sàn giao dịch thương mại điện tử
-2. Chính sách phí và biểu phí
-3. Chính sách mô hình vận hành
-4. Bảng nội dung vi phạm và các hình thức xử lý vi phạm của nhà bán hàng
-5. Chính sách bảo mật
-
-Bạn có thể tìm hiểu chi tiết về các chính sách này tại: https://iuh-ecomerce.vn/quy-che-hoat-dong-sgdtmdt
-
-Bạn muốn tìm hiểu thêm về chính sách nào trong số này không? Tôi sẽ rất vui được giải thích chi tiết hơn cho bạn."""
+        if search_results and isinstance(search_results[0], dict):
+            # Tổng hợp các câu trả lời và nội dung liên quan
+            context_list = []
+            for idx, result in enumerate(search_results):
+                payload = result.get("payload", {})
+                answer = payload.get("answer", "")
+                text_content = payload.get("text_content", "")
+                if answer or text_content:
+                    context_list.append(f"- {text_content if text_content else answer}")
+            context = "\n".join(context_list)
+            prompt = (
+                f"Khách hàng hỏi: {message}\n"
+                f"Dưới đây là các thông tin chính sách liên quan mà hệ thống tìm được:\n{context}\n"
+                "Hãy tổng hợp và trả lời lại cho khách hàng một cách chi tiết, thân thiện, tự nhiên, dễ hiểu nhất, đảm bảo đầy đủ các ý quan trọng. Nếu có điều kiện, thời gian, quy trình, hãy nêu rõ."
+            )
+            gpt_response = assistant.generate_reply([{"role": "user", "content": prompt}])
+            response_content = gpt_response["content"] if isinstance(gpt_response, dict) and "content" in gpt_response else str(gpt_response)
         else:
             response_content = "Xin lỗi, tôi không tìm thấy thông tin liên quan đến câu hỏi của bạn. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ để được giải đáp."
 

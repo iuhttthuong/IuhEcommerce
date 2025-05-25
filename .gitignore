@@ -115,7 +115,7 @@ raft_state.json
 # Data and Collections
 data/
 collections/
-crawl datas/
+crawl_datas/
 import_data/
 minio_data/
 mongo_data/

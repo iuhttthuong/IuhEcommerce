@@ -28,11 +28,14 @@ from controllers import (discounts,
                         reviews,
                         shopping_carts,
                         cart_items,
-                        orders
+                        orders,
+                        synthetic,
+                        auths
 )
 from controllers.shops import router as shop_controller
 from routers.shop_chat import router as shop_chat_router
 from routers.shop import router as shop_router
+from shop_chat.marketing import router as marketing_router
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -48,16 +51,24 @@ app = FastAPI(
     debug=env.DEBUG
 )
 
-# Add CORS middleware for local development
-if AppEnvironment.is_local_env(env.APP_ENV):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
+# # Add CORS middleware for local development
+# if AppEnvironment.is_local_env(env.APP_ENV):
+#     app.add_middleware(
+#         CORSMiddleware,
+#         allow_origins=["*"],
+#         allow_credentials=True,
+#         allow_methods=["*"],
+#         allow_headers=["*"],
+#     )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(auths.router, prefix = "/api")
+app.include_router(synthetic.router, prefix="/api/synthetic", tags=["Synthetic Data"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 app.include_router(shopping_carts.router, prefix="/api/shopping-carts", tags=["Shopping Carts"])
 app.include_router(cart_items.router, prefix="/api/cart-items", tags=["Cart Items"])
@@ -77,6 +88,7 @@ app.include_router(product_discounts.router, prefix="/api/product-discounts", ta
 app.include_router(shops.router, prefix="/api/shops", tags=["Shops"])
 app.include_router(shop_chat_router, prefix="/api/shop/chat", tags=["Shop Chat"])
 app.include_router(shop_router, prefix="/api/shop", tags=["Shop Management"])
+app.include_router(marketing_router, prefix="/api/shop/marketing", tags=["Shop Marketing"])
 
 # FAQ and Policy endpoints
 app.include_router(faq_loader.router, prefix="/api/faq-loader", tags=["FAQ Loader"])

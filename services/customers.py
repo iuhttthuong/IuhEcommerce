@@ -17,3 +17,7 @@ class CustomerService:
     @staticmethod
     def delete_customer(customer_id: int):
         return CustomerRepository.delete(customer_id)
+
+    @staticmethod
+    def check_customer(customer_id: int):
+        return CustomerRepository.check_customer(customer_id)

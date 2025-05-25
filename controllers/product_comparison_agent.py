@@ -6,12 +6,14 @@ from autogen import ConversableAgent
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from env import env
 from models.chats import ChatMessageCreate
 from repositories.message import MessageRepository
 from services.products import ProductServices
-from services.search import SearchServices
+from repositories.search_compare import SearchCompareRepository
+from db import SessionLocal
 
 router = APIRouter(prefix="/product-comparison", tags=["Product Comparison"])
 
@@ -34,6 +36,11 @@ class ProductComparisonAgent:
             "api_key": env.OPENAI_API_KEY
         }
         self.agent = self._create_comparison_agent()
+        self.db = SessionLocal()
+
+    def __del__(self):
+        if hasattr(self, 'db'):
+            self.db.close()
 
     def _create_comparison_agent(self) -> ConversableAgent:
         system_message = """
@@ -91,6 +98,16 @@ class ProductComparisonAgent:
                 "focus": "all"
             }
 
+    def _get_brand_name(self, brand_id):
+        from models.brands import Brand
+        brand = self.db.query(Brand).filter(Brand.brand_id == brand_id).first()
+        return brand.brand_name if brand else "N/A"
+
+    def _get_category_name(self, category_id):
+        from models.categories import Category
+        category = self.db.query(Category).filter(Category.category_id == category_id).first()
+        return category.name if category else "N/A"
+
     def _find_products(self, product_identifiers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         products = []
         
@@ -99,44 +116,72 @@ class ProductComparisonAgent:
             value = identifier.get("value")
             
             if id_type == "id" and isinstance(value, int):
-                # Truy vấn trực tiếp theo ID
-                product = ProductServices.get(value)
+                # Query directly by ID
+                product = ProductServices(self.db).get(value)
                 if product:
-                    products.append(product.__dict__)
+                    product_dict = product.__dict__.copy()
+                    product_dict["brand_name"] = self._get_brand_name(product_dict.get("brand_id"))
+                    product_dict["category_name"] = self._get_category_name(product_dict.get("category_id"))
+                    products.append(product_dict)
             elif id_type == "name" and isinstance(value, str):
-                # Tìm kiếm theo tên sản phẩm
-                results = SearchServices.search(
-                    payload=value,
-                    collection_name="product_name_embeddings",
-                    limit=1
-                )
-                if results:
-                    product = ProductServices.get(results[0])
-                    if product:
-                        products.append(product.__dict__)
-                        
+                try:
+                    # First try direct database search
+                    search_results = ProductServices(self.db).search(value)
+                    if search_results:
+                        product = search_results[0]
+                        product_dict = product.__dict__.copy()
+                        product_dict["brand_name"] = self._get_brand_name(product_dict.get("brand_id"))
+                        product_dict["category_name"] = self._get_category_name(product_dict.get("category_id"))
+                        products.append(product_dict)
+                        continue
+
+                    # If no direct match found, try semantic search
+                    clean_name = value.lower().strip()
+                    results = SearchCompareRepository.semantic_search(
+                        query=clean_name,
+                        limit=3
+                    )
+                    
+                    if results:
+                        # Try to find the best match
+                        best_match = None
+                        for result in results:
+                            product = ProductServices(self.db).get(result["payload"]["product_id"])
+                            if product:
+                                if clean_name in product.name.lower():
+                                    best_match = product
+                                    break
+                        if best_match:
+                            product_dict = best_match.__dict__.copy()
+                            product_dict["brand_name"] = self._get_brand_name(product_dict.get("brand_id"))
+                            product_dict["category_name"] = self._get_category_name(product_dict.get("category_id"))
+                            products.append(product_dict)
+                        else:
+                            product = ProductServices(self.db).get(results[0]["payload"]["product_id"])
+                            if product:
+                                product_dict = product.__dict__.copy()
+                                product_dict["brand_name"] = self._get_brand_name(product_dict.get("brand_id"))
+                                product_dict["category_name"] = self._get_category_name(product_dict.get("category_id"))
+                                products.append(product_dict)
+                except Exception as e:
+                    logger.error(f"Error searching for product '{value}': {str(e)}")
+                    continue
         return products
 
     def _extract_common_attributes(self, products: List[Dict[str, Any]]) -> List[str]:
-        """Trích xuất các thuộc tính chung giữa các sản phẩm để so sánh"""
         if not products:
             return []
-            
-        # Các thuộc tính cơ bản luôn so sánh
-        common_attributes = ["name", "price", "brand", "category_name", "rating"]
-        
-        # Thêm các thuộc tính từ specifications nếu có
+        common_attributes = [
+            "name", "price", "brand_name", "category_name", "rating_average", "short_description"
+        ]
         spec_keys = set()
         for product in products:
             specs = product.get("specifications", {})
             if specs and isinstance(specs, dict):
                 spec_keys.update(specs.keys())
-                
-        # Thêm các thuộc tính specifications phổ biến
         for key in spec_keys:
             if all(key in product.get("specifications", {}) for product in products):
                 common_attributes.append(f"spec_{key}")
-                
         return common_attributes
 
     def _create_comparison_table(self, products: List[Dict[str, Any]], criteria: List[str]) -> Dict[str, List[Any]]:
@@ -151,16 +196,16 @@ class ProductComparisonAgent:
         filtered_attributes = []
         for attr in attributes:
             # Thuộc tính cơ bản
-            if attr in ["name", "price", "brand", "category_name"]:
+            if attr in ["name", "price", "brand_name", "category_name"]:
                 filtered_attributes.append(attr)
                 continue
                 
             # Lọc theo tiêu chí
             if "giá" in criteria and attr == "price":
                 filtered_attributes.append(attr)
-            elif "thương hiệu" in criteria and attr == "brand":
+            elif "thương hiệu" in criteria and attr == "brand_name":
                 filtered_attributes.append(attr)
-            elif "đánh giá" in criteria and attr == "rating":
+            elif "đánh giá" in criteria and attr == "rating_average":
                 filtered_attributes.append(attr)
             elif "thông số" in criteria or "kỹ thuật" in criteria:
                 if attr.startswith("spec_"):
@@ -199,73 +244,35 @@ class ProductComparisonAgent:
         return comparison_table
 
     def _generate_comparison_summary(self, products: List[Dict[str, Any]], comparison_table: Dict[str, List[Any]]) -> str:
-        """Tạo tóm tắt so sánh giữa các sản phẩm"""
-        if not products or len(products) < 2:
-            return "Cần ít nhất 2 sản phẩm để so sánh."
-            
-        # So sánh giá
-        price_diff = []
-        for i in range(len(products)):
-            for j in range(i+1, len(products)):
-                price_i = products[i].get("price", 0)
-                price_j = products[j].get("price", 0)
-                
-                if price_i > price_j:
-                    diff = price_i - price_j
-                    percent = (diff / price_j) * 100
-                    price_diff.append(f"{products[i]['name']} đắt hơn {products[j]['name']} {diff:,} VNĐ ({percent:.1f}%)")
-                elif price_j > price_i:
-                    diff = price_j - price_i
-                    percent = (diff / price_i) * 100
-                    price_diff.append(f"{products[j]['name']} đắt hơn {products[i]['name']} {diff:,} VNĐ ({percent:.1f}%)")
-                    
-        # So sánh đánh giá
-        rating_diff = []
-        for i in range(len(products)):
-            for j in range(i+1, len(products)):
-                rating_i = products[i].get("rating", 0)
-                rating_j = products[j].get("rating", 0)
-                
-                if rating_i > rating_j:
-                    diff = rating_i - rating_j
-                    rating_diff.append(f"{products[i]['name']} có đánh giá cao hơn {products[j]['name']} {diff:.1f} sao")
-                elif rating_j > rating_i:
-                    diff = rating_j - rating_i
-                    rating_diff.append(f"{products[j]['name']} có đánh giá cao hơn {products[i]['name']} {diff:.1f} sao")
-                    
-        # Tạo tóm tắt
         summary = "### Tóm tắt so sánh\n\n"
-        
-        if price_diff:
-            summary += "**So sánh giá:**\n"
-            for diff in price_diff[:3]:  # Giới hạn số lượng
-                summary += f"- {diff}\n"
-            summary += "\n"
-            
-        if rating_diff:
-            summary += "**So sánh đánh giá:**\n"
-            for diff in rating_diff[:3]:  # Giới hạn số lượng
-                summary += f"- {diff}\n"
-            summary += "\n"
-            
-        # Thêm nhận xét về một số thông số kỹ thuật nếu có
-        specs_diff = []
-        for i in range(len(products)):
-            for j in range(i+1, len(products)):
-                specs_i = products[i].get("specifications", {})
-                specs_j = products[j].get("specifications", {})
-                
-                # So sánh các thông số chung
-                common_specs = set(specs_i.keys()) & set(specs_j.keys())
-                for spec in common_specs:
-                    if specs_i[spec] != specs_j[spec]:
-                        specs_diff.append(f"**{spec}:** {products[i]['name']} ({specs_i[spec]}) vs {products[j]['name']} ({specs_j[spec]})")
-                        
-        if specs_diff:
-            summary += "**So sánh thông số kỹ thuật:**\n"
-            for diff in specs_diff[:5]:  # Giới hạn số lượng
-                summary += f"- {diff}\n"
-                
+        # So sánh giá
+        prices = [p.get("price", 0) for p in products]
+        if len(set(prices)) > 1:
+            idx_max = prices.index(max(prices))
+            idx_min = prices.index(min(prices))
+            summary += f"- {products[idx_max]['name']} có giá cao hơn ({products[idx_max]['price']:,} VNĐ) so với {products[idx_min]['name']} ({products[idx_min]['price']:,} VNĐ).\n"
+        # So sánh đánh giá
+        ratings = [p.get("rating_average", 0) for p in products]
+        if len(set(ratings)) > 1:
+            idx_max = ratings.index(max(ratings))
+            idx_min = ratings.index(min(ratings))
+            summary += f"- {products[idx_max]['name']} được đánh giá cao hơn ({products[idx_max]['rating_average']}) so với {products[idx_min]['name']} ({products[idx_min]['rating_average']}).\n"
+        # So sánh thương hiệu
+        brands = [p.get("brand_name", "N/A") for p in products]
+        if len(set(brands)) > 1:
+            summary += "- Các sản phẩm thuộc các thương hiệu khác nhau: " + ", ".join(set(brands)) + ".\n"
+        else:
+            summary += f"- Cả hai sản phẩm đều thuộc thương hiệu {brands[0]}.\n"
+        # So sánh danh mục
+        categories = [p.get("category_name", "N/A") for p in products]
+        if len(set(categories)) > 1:
+            summary += "- Các sản phẩm thuộc các danh mục khác nhau: " + ", ".join(set(categories)) + ".\n"
+        else:
+            summary += f"- Cả hai sản phẩm đều thuộc danh mục {categories[0]}.\n"
+        # Mô tả ngắn
+        summary += "**Mô tả ngắn:**\n"
+        for p in products:
+            summary += f"- {p['name']}: {p.get('short_description', '')}\n"
         return summary
 
     def _format_comparison_response(self, products: List[Dict[str, Any]], comparison_table: Dict[str, List[Any]], comparison_summary: str) -> str:
@@ -318,93 +325,78 @@ class ProductComparisonAgent:
             
         return response
 
-    async def process_request(self, request: ComparisonRequest) -> ComparisonResponse:
+    async def process_request(self, request: Union[ComparisonRequest, 'ChatbotRequest']) -> ComparisonResponse:
         try:
-            # Sử dụng product_ids nếu đã được cung cấp
-            if request.product_ids and len(request.product_ids) >= 2:
-                products = []
-                for pid in request.product_ids:
-                    product = ProductServices.get(pid)
+            # Convert ChatbotRequest to ComparisonRequest if needed
+            if hasattr(request, 'entities'):
+                product_ids = None
+                if request.entities and 'product_ids' in request.entities:
+                    try:
+                        product_ids = request.entities['product_ids']
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid product_ids in entities: {request.entities.get('product_ids')}")
+                
+                request = ComparisonRequest(
+                    chat_id=request.chat_id,
+                    message=request.message,
+                    product_ids=product_ids,
+                    entities=request.entities
+                )
+
+            # Get comparison query from LLM
+            response = await self.agent.a_generate_reply(
+                messages=[{"role": "user", "content": request.message}]
+            )
+            
+            # Extract comparison query
+            if isinstance(response, str):
+                comparison_query = self._extract_comparison_query(response)
+            else:
+                comparison_query = self._extract_comparison_query(response.get('content', ''))
+            
+            # Find products to compare
+            products = []
+            if request.product_ids:
+                # Use provided product IDs
+                for product_id in request.product_ids:
+                    product = ProductServices(self.db).get(product_id)
                     if product:
                         products.append(product.__dict__)
-                        
-                if len(products) < 2:
-                    return ComparisonResponse(
-                        content="Cần ít nhất 2 sản phẩm hợp lệ để so sánh.",
-                        products=[],
-                        comparison_table={},
-                        comparison_summary=""
-                    )
-                    
-                # Sử dụng các tiêu chí mặc định
-                criteria = ["giá", "thông số kỹ thuật", "đánh giá"]
-                focus = "all"
-                
             else:
-                # Phân tích yêu cầu để xác định sản phẩm và tiêu chí
-                prompt = f"""
-                Hãy phân tích yêu cầu so sánh sản phẩm sau:
-                "{request.message}"
-                
-                Các thực thể đã được xác định:
-                {request.entities if request.entities else 'Không có thông tin thực thể.'}
-                """
-                
-                # Gọi agent để phân tích
-                agent_response = await self.agent.a_generate_reply(messages=[{"role": "user", "content": prompt}])
-                
-                # Trích xuất thông tin truy vấn
-                query_info = self._extract_comparison_query(agent_response)
-                
-                # Tìm sản phẩm
-                products = self._find_products(query_info.get("product_identifiers", []))
-                
-                if len(products) < 2:
-                    return ComparisonResponse(
-                        content="Không thể xác định đủ sản phẩm để so sánh. Vui lòng cung cấp tên hoặc ID của ít nhất 2 sản phẩm.",
-                        products=products,
-                        comparison_table={},
-                        comparison_summary=""
-                    )
-                    
-                criteria = query_info.get("comparison_criteria", ["giá", "thông số kỹ thuật", "đánh giá"])
-                focus = query_info.get("focus", "all")
+                # Use product identifiers from LLM response
+                products = self._find_products(comparison_query.get('product_identifiers', []))
             
-            # Tạo bảng so sánh
-            comparison_table = self._create_comparison_table(products, criteria)
+            if not products:
+                return ComparisonResponse(
+                    content="Xin lỗi, tôi không tìm thấy sản phẩm để so sánh. Vui lòng cung cấp tên hoặc ID sản phẩm cụ thể.",
+                    products=[],
+                    comparison_table={},
+                    comparison_summary=""
+                )
             
-            # Tạo tóm tắt so sánh
+            # Create comparison table
+            comparison_table = self._create_comparison_table(
+                products,
+                comparison_query.get('comparison_criteria', [])
+            )
+            
+            # Generate comparison summary
             comparison_summary = self._generate_comparison_summary(products, comparison_table)
             
-            # Định dạng kết quả
-            response_content = self._format_comparison_response(products, comparison_table, comparison_summary)
-            
-            # Lưu thông tin tương tác vào message repository
-            message_repository = MessageRepository()
-            response_payload = ChatMessageCreate(
-                chat_id=request.chat_id,
-                sender_type="assistant",
-                sender_id=0,  # You may need to adjust this based on your requirements
-                content=response_content,
-                metadata={
-                    "intent": "compare_products",
-                    "entities": request.entities,
-                    "confidence": 0.8  # Assuming a default confidence
-                }
-            )
-            message_repository.create(response_payload)
+            # Format response
+            content = self._format_comparison_response(products, comparison_table, comparison_summary)
             
             return ComparisonResponse(
-                content=response_content,
+                content=content,
                 products=products,
                 comparison_table=comparison_table,
                 comparison_summary=comparison_summary
             )
             
         except Exception as e:
-            logger.error(f"Lỗi trong product_comparison_agent: {e}")
+            logger.error(f"Lỗi trong product_comparison_agent: {str(e)}")
             return ComparisonResponse(
-                content=f"Đã xảy ra lỗi khi so sánh sản phẩm: {str(e)}",
+                content=f"Xin lỗi, đã xảy ra lỗi khi so sánh sản phẩm: {str(e)}",
                 products=[],
                 comparison_table={},
                 comparison_summary=""

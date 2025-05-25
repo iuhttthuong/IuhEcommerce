@@ -1,0 +1,161 @@
+# Test cases for Shop Chat System
+
+# 1. Policy Agent Tests
+{
+    "agent": "PolicyAgent",
+    "query": "Chính sách đổi trả hàng của IUH-Ecommerce"
+}
+
+{
+    "agent": "PolicyAgent",
+    "query": "Chính sách vận chuyển và giao hàng"
+}
+
+{
+    "agent": "PolicyAgent",
+    "query": "Chính sách bảo hành sản phẩm"
+}
+
+# 2. Product Management Agent Tests
+{
+    "agent": "ProductAgent",
+    "query": "Cách thêm sản phẩm mới vào shop"
+}
+
+{
+    "agent": "ProductAgent",
+    "query": "Cập nhật thông tin sản phẩm"
+}
+
+{
+    "agent": "ProductAgent",
+    "query": "Xóa sản phẩm khỏi shop"
+}
+
+# 3. Shop Manager Agent Tests
+{
+    "agent": "ShopManagerAgent",
+    "query": "Cách cài đặt thông tin shop"
+}
+
+{
+    "agent": "ShopManagerAgent",
+    "query": "Quản lý nhân viên shop"
+}
+
+{
+    "agent": "ShopManagerAgent",
+    "query": "Cài đặt phương thức thanh toán"
+}
+
+# 4. Inventory Agent Tests
+{
+    "agent": "InventoryAgent",
+    "query": "Kiểm tra tồn kho sản phẩm"
+}
+
+{
+    "agent": "InventoryAgent",
+    "query": "Cập nhật số lượng tồn kho"
+}
+
+{
+    "agent": "InventoryAgent",
+    "query": "Báo cáo tồn kho"
+}
+
+# 5. Customer Service Agent Tests
+{
+    "agent": "CustomerServiceAgent",
+    "query": "Xử lý khiếu nại của khách hàng"
+}
+
+{
+    "agent": "CustomerServiceAgent",
+    "query": "Trả lời tin nhắn khách hàng"
+}
+
+{
+    "agent": "CustomerServiceAgent",
+    "query": "Đánh giá và phản hồi"
+}
+
+# 6. Analytics Agent Tests
+{
+    "agent": "AnalyticsAgent",
+    "query": "Báo cáo doanh số bán hàng"
+}
+
+{
+    "agent": "AnalyticsAgent",
+    "query": "Thống kê sản phẩm bán chạy"
+}
+
+{
+    "agent": "AnalyticsAgent",
+    "query": "Phân tích hành vi khách hàng"
+}
+
+# 7. Marketing Agent Tests
+{
+    "agent": "MarketingAgent",
+    "query": "Tạo chương trình khuyến mãi"
+}
+
+{
+    "agent": "MarketingAgent",
+    "query": "Quản lý mã giảm giá"
+}
+
+{
+    "agent": "MarketingAgent",
+    "query": "Chiến dịch marketing"
+}
+
+# Test Cases for Error Handling
+{
+    "agent": "PolicyAgent",
+    "query": ""
+}
+
+{
+    "agent": "InvalidAgent",
+    "query": "Test invalid agent"
+}
+
+{
+    "agent": "PolicyAgent",
+    "query": "!@#$%^&*()"
+}
+
+# Test Cases for Complex Queries
+{
+    "agent": "PolicyAgent",
+    "query": "Chính sách đổi trả và hoàn tiền cho sản phẩm điện tử"
+}
+
+{
+    "agent": "ProductAgent",
+    "query": "Cách thêm nhiều sản phẩm cùng lúc và cập nhật giá"
+}
+
+{
+    "agent": "AnalyticsAgent",
+    "query": "Báo cáo doanh số theo thời gian và phân tích xu hướng"
+}
+
+# Test Cases for Multi-Agent Scenarios
+{
+    "agent": "ShopManagerAgent",
+    "query": "Cài đặt chính sách đổi trả và phương thức thanh toán"
+}
+
+{
+    "agent": "CustomerServiceAgent",
+    "query": "Xử lý khiếu nại về sản phẩm và cập nhật tồn kho"
+}
+
+{
+    "agent": "MarketingAgent",
+    "query": "Tạo chiến dịch khuyến mãi và báo cáo hiệu quả"
+}

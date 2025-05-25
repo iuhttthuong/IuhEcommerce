@@ -339,10 +339,9 @@ class ProductInfoAgent:
             if not request.product_id:
                 # Search for products based on the message
                 search_results = SearchServices.search(
-                    payload=request.message,
+                    query=request.message,
                     collection_name="products",
-                    limit=5,
-                    score_threshold=0.5  # Lower threshold to get more results
+                    limit=5
                 )
                 
                 if not search_results:
@@ -512,6 +511,222 @@ class ProductInfoAgent:
                 product_info={},
                 query_type="error",
                 context_used={}
+            )
+
+    async def process_request(self, request: Union[ProductInfoRequest, Any]) -> ProductInfoResponse:
+        """Process a product information request."""
+        try:
+            # Convert any request type to ProductInfoRequest
+            if not isinstance(request, ProductInfoRequest):
+                # Extract necessary fields from the request object
+                product_id = getattr(request, 'product_id', None)
+                if product_id is None and hasattr(request, 'entities'):
+                    entities = getattr(request, 'entities', {})
+                    if isinstance(entities, dict):
+                        product_id = entities.get('product_id')
+                
+                request = ProductInfoRequest(
+                    chat_id=getattr(request, 'chat_id', 0),
+                    message=getattr(request, 'message', ''),
+                    product_id=product_id,
+                    entities=getattr(request, 'entities', {})
+                )
+
+            # If no product_id is provided, try to search by text
+            if not request.product_id:
+                # First, extract product keywords from the question
+                keyword_prompt = f"""
+                Từ câu hỏi của người dùng, hãy trích xuất từ khóa sản phẩm chính.
+                Chỉ trả về từ khóa, không thêm giải thích hay định dạng.
+
+                Câu hỏi: {request.message}
+                """
+                
+                keyword_response = await self.agent.a_generate_reply(
+                    messages=[{"role": "user", "content": keyword_prompt}]
+                )
+                
+                # Clean up the keyword response
+                keywords = str(keyword_response).strip()
+                logger.info(f"Extracted keywords: {keywords}")
+
+                # Search for products using the keywords
+                search_results = SearchServices.search(
+                    query=keywords,
+                    collection_name="product_embeddings",  # Changed to correct collection name
+                    limit=5
+                )
+                
+                if not search_results:
+                    logger.warning(f"No products found for keywords: {keywords}")
+                    return ProductInfoResponse(
+                        content="Xin lỗi, tôi không tìm thấy sản phẩm phù hợp. Bạn có thể thử:\n"
+                               "1. Sử dụng từ khóa khác\n"
+                               "2. Tìm kiếm theo danh mục\n"
+                               "3. Cung cấp ID sản phẩm cụ thể",
+                        product_info={},
+                        query_type="error",
+                        context_used={"message": request.message, "keywords": keywords}
+                    )
+                
+                # Format search results
+                products_info = []
+                for result in search_results:
+                    try:
+                        payload = result.get("payload", {})
+                        product_info = {
+                            "id": result.get("id"),
+                            "name": payload.get("product_name"),
+                            "description": payload.get("description"),
+                            "category": payload.get("category"),
+                            "similarity_score": result.get("score", 0)
+                        }
+                        products_info.append(product_info)
+                    except Exception as e:
+                        logger.warning(f"Error formatting product info: {e}")
+                        continue
+                
+                if not products_info:
+                    return ProductInfoResponse(
+                        content="Xin lỗi, tôi không thể hiển thị thông tin sản phẩm. Vui lòng thử lại sau.",
+                        product_info={},
+                        query_type="error",
+                        context_used={"message": request.message, "keywords": keywords}
+                    )
+                
+                # Generate response using LLM
+                response_prompt = f"""
+                Dựa trên thông tin sản phẩm tìm thấy, hãy tạo phản hồi thân thiện cho người dùng.
+                
+                Câu hỏi của người dùng: {request.message}
+                
+                Thông tin sản phẩm tìm thấy:
+                {json.dumps(products_info, indent=2, ensure_ascii=False)}
+                
+                Yêu cầu:
+                1. Mở đầu bằng lời chào thân thiện
+                2. Trả lời câu hỏi dựa trên thông tin sản phẩm có sẵn
+                3. Nếu có nhiều sản phẩm, liệt kê các sản phẩm phù hợp nhất
+                4. Kết thúc bằng gợi ý nếu người dùng muốn biết thêm thông tin chi tiết
+                5. Giữ giọng điệu chuyên nghiệp và thân thiện
+                6. KHÔNG sử dụng markdown hoặc định dạng đặc biệt
+                """
+                
+                # Get response from agent
+                agent_response = await self.agent.a_generate_reply(
+                    messages=[{"role": "user", "content": response_prompt}]
+                )
+                
+                return ProductInfoResponse(
+                    content=str(agent_response),
+                    product_info={"products": products_info},
+                    query_type="product_search",
+                    context_used={
+                        "message": request.message,
+                        "keywords": keywords,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+
+            # If product_id is provided, get detailed information
+            product_info = ProductServices.get_info(request.product_id)
+            if not product_info or not product_info.get("product"):
+                logger.warning(f"Product with ID {request.product_id} not found")
+                return ProductInfoResponse(
+                    content="Xin lỗi, không tìm thấy thông tin sản phẩm. Vui lòng kiểm tra lại ID sản phẩm.",
+                    product_info={},
+                    query_type="error",
+                    context_used={}
+                )
+
+            # Get product details
+            product = product_info["product"]
+            brand = product_info.get("brand", [{}])[0] if product_info.get("brand") else {}
+            category = product_info.get("category", [{}])[0] if product_info.get("category") else {}
+            inventory = product_info.get("inventory", [{}])[0] if product_info.get("inventory") else {}
+
+            # Handle category_id
+            try:
+                if isinstance(category.get("id"), str):
+                    # Try to extract first number from string like "1520/1584/1587/68187/0"
+                    category_id = int(category.get("id").split("/")[0])
+                else:
+                    category_id = int(category.get("id", 0)) if category else 0
+            except (ValueError, TypeError, IndexError):
+                category_id = 0
+
+            # Handle datetime fields
+            def format_datetime(dt):
+                if dt is None:
+                    return None
+                try:
+                    if isinstance(dt, str):
+                        return dt
+                    return dt.isoformat()
+                except (AttributeError, TypeError):
+                    return None
+
+            # Prepare product information
+            product_details = {
+                "id": product.id,
+                "name": product.name,
+                "description": product.description,
+                "price": product.price,
+                "brand": brand.get("name") if brand else None,
+                "category": category.get("name") if category else None,
+                "category_id": category_id,
+                "stock": inventory.get("quantity", 0) if inventory else 0,
+                "created_at": format_datetime(getattr(product, 'created_at', None)),
+                "updated_at": format_datetime(getattr(product, 'updated_at', None))
+            }
+
+            # Generate response using LLM
+            prompt = f"""
+            Phân tích thông tin sản phẩm và tạo phản hồi thân thiện với người dùng.
+            
+            Thông tin sản phẩm:
+            - Tên: {product.name}
+            - Mô tả: {product.description}
+            - Giá: {product.price:,} VND
+            - Thương hiệu: {brand.get('name') if brand else 'Không có'}
+            - Danh mục: {category.get('name') if category else 'Không có'}
+            - Số lượng tồn kho: {inventory.get('quantity', 0) if inventory else 0}
+            
+            Người dùng hỏi: "{request.message}"
+            
+            Hãy tạo phản hồi thân thiện, đầy đủ thông tin và hữu ích.
+            """
+
+            # Get response from agent
+            agent_response = await self.agent.a_generate_reply(
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            # Ensure response is a string
+            if isinstance(agent_response, dict):
+                response_content = json.dumps(agent_response, ensure_ascii=False)
+            elif isinstance(agent_response, (list, tuple)):
+                response_content = "\n".join(str(item) for item in agent_response)
+            else:
+                response_content = str(agent_response)
+
+            return ProductInfoResponse(
+                content=response_content,
+                product_info=product_details,
+                query_type="product_info",
+                context_used={
+                    "message": request.message,
+                    "product_id": request.product_id,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error in process_request: {str(e)}")
+            return ProductInfoResponse(
+                content=f"Đã xảy ra lỗi khi xử lý yêu cầu: {str(e)}",
+                query_type="error",
+                context_used={"error": str(e)}
             )
 
 

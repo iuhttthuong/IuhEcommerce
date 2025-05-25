@@ -1,0 +1,121 @@
+I'll help you create a comprehensive test suite of questions to test all the agents in your system. Let me analyze the available agents first:
+
+
+Ran tool
+Based on the files in your controllers directory, I can see several agents. Let me create a comprehensive test suite for each agent:
+
+1. **SearchDiscoveryAgent** (search_discovery_agent.py):
+```python
+test_questions = [
+    "Tìm cho tôi bột giặt dưới 100k",
+    "Tôi muốn mua nước giặt có mùi thơm",
+    "Tìm sản phẩm giặt giũ có đánh giá 4 sao trở lên",
+    "Gợi ý cho tôi các sản phẩm nước giặt của thương hiệu Bell Home",
+    "Tìm kiếm bột giặt trong khoảng giá 50k-200k"
+]
+```
+
+2. **RecommendationAgent** (recommendation_agent.py):
+```python
+test_questions = [
+    "Dựa vào lịch sử mua hàng của tôi, gợi ý sản phẩm phù hợp",
+    "Tôi thường mua nước giặt, gợi ý thêm sản phẩm tương tự",
+    "Những sản phẩm nào phù hợp với người hay bị dị ứng da?",
+    "Gợi ý sản phẩm thay thế cho nước giặt Omo",
+    "Tôi đang tìm sản phẩm giặt giũ thân thiện với môi trường"
+]
+```
+
+3. **ReviewAgent** (review_agent.py):
+```python
+test_questions = [
+    "Đánh giá của khách hàng về nước giặt Bell Home",
+    "Sản phẩm này có nhiều người mua không?",
+    "Tổng hợp ý kiến về chất lượng của bột giặt Omo",
+    "Những ưu điểm và nhược điểm của nước giặt này",
+    "So sánh đánh giá giữa các sản phẩm nước giặt"
+]
+```
+
+4. **ProductInfoAgent** (product_info_agent.py):
+```python
+test_questions = [
+    "Thông tin chi tiết về nước giặt Bell Home",
+    "Cách sử dụng bột giặt này như thế nào?",
+    "Thành phần của nước giặt này có gì?",
+    "Sản phẩm này có phù hợp với máy giặt cửa trước không?",
+    "Hướng dẫn bảo quản sản phẩm này"
+]
+```
+
+5. **ProductComparisonAgent** (product_comparison_agent.py):
+```python
+test_questions = [
+    "So sánh nước giặt Bell Home và Omo",
+    "Điểm khác biệt giữa bột giặt và nước giặt",
+    "Sản phẩm nào tốt hơn giữa A và B?",
+    "Phân tích ưu nhược điểm của các loại nước giặt",
+    "So sánh giá và chất lượng của các sản phẩm giặt giũ"
+]
+```
+
+6. **UserProfileAgent** (user_profile_agent.py):
+```python
+test_questions = [
+    "Tôi thường mua những sản phẩm gì?",
+    "Phân tích thói quen mua sắm của tôi",
+    "Gợi ý sản phẩm dựa trên sở thích của tôi",
+    "Tôi thường mua hàng vào thời điểm nào?",
+    "Tổng hợp lịch sử mua sắm của tôi"
+]
+```
+
+7. **OrchestratorAgent** (orchestrator_agent.py):
+```python
+test_questions = [
+    "Tôi muốn mua nước giặt tốt nhất trong tầm giá 100k",
+    "Gợi ý sản phẩm thay thế cho nước giặt tôi đang dùng",
+    "Tìm kiếm và so sánh các sản phẩm nước giặt",
+    "Phân tích đánh giá và đề xuất sản phẩm phù hợp",
+    "Tìm sản phẩm giặt giũ phù hợp với gia đình có trẻ nhỏ"
+]
+```
+
+8. **PolicyAgent** (polici_agent.py):
+```python
+test_questions = [
+    "Chính sách đổi trả sản phẩm như thế nào?",
+    "Thời gian bảo hành của sản phẩm này?",
+    "Cách thức thanh toán khi mua hàng?",
+    "Chính sách vận chuyển và giao hàng?",
+    "Điều kiện để được giảm giá sản phẩm?"
+]
+```
+
+Để test toàn diện, bạn nên:
+
+1. Test từng agent riêng lẻ với các câu hỏi tương ứng
+2. Test các tình huống kết hợp nhiều agent (thông qua OrchestratorAgent)
+3. Test các trường hợp đặc biệt:
+   - Câu hỏi không rõ ràng
+   - Câu hỏi ngoài phạm vi
+   - Câu hỏi có nhiều yêu cầu
+   - Câu hỏi về sản phẩm không tồn tại
+   - Câu hỏi về chính sách đặc biệt
+
+4. Test hiệu suất:
+   - Thời gian phản hồi
+   - Độ chính xác của kết quả
+   - Khả năng xử lý đồng thời nhiều yêu cầu
+
+5. Test tích hợp:
+   - Tương tác giữa các agent
+   - Luồng xử lý end-to-end
+   - Xử lý lỗi và phục hồi
+
+Bạn có thể sử dụng các câu hỏi này để tạo một test suite tự động hoặc thực hiện test thủ công. Mỗi câu hỏi nên được đánh giá dựa trên:
+- Độ chính xác của phản hồi
+- Thời gian phản hồi
+- Tính tự nhiên của ngôn ngữ
+- Khả năng xử lý ngữ cảnh
+- Độ hữu ích của thông tin cung cấp

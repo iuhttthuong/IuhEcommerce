@@ -1,30 +1,16 @@
 import json
 from typing import Any, Dict, List, Optional, Union
-import random
-import numpy as np
-import pandas as pd
-import xgboost as xgb
-from sklearn.feature_extraction.text import TfidfVectorizer
-import pickle
-import os
-
-import autogen
-from autogen import ConversableAgent
 from fastapi import APIRouter, HTTPException, Depends
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from openai import OpenAI
 
 from env import env
-from models.chats import ChatMessageCreate
-from repositories.message import MessageRepository
-from services.products import ProductServices
 from db import get_db
-from models.reviews import Review
 from repositories.reviews import ReviewRepositories
-from sklearn.model_selection import train_test_split
-from xgboost import XGBClassifier
-import joblib
+from repositories.search import SearchRepository
+from repositories.products import ProductRepositories
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
 
@@ -38,143 +24,213 @@ class ReviewResponse(BaseModel):
     content: str = Field(..., description="Nội dung phản hồi từ agent")
     product_id: Optional[int] = Field(default=None, description="ID sản phẩm")
     review_summary: Optional[Dict[str, Any]] = Field(default=None, description="Tóm tắt đánh giá")
-    query_type: str = Field(..., description="Loại truy vấn: summary, sentiment, specific_question, recommendation")
+    query_type: str = Field(..., description="Loại truy vấn: review, error")
     
 class ReviewAgent:
     def __init__(self, db: Session):
         self.db = db
         self.review_repo = ReviewRepositories(db)
-        self.vectorizer = None
-        self.model = None
-        self._load_or_train_sentiment_model()
+        self.product_repo = ProductRepositories(db)
+        self.search_repo = SearchRepository()
+        self.client = OpenAI(api_key=env.OPENAI_API_KEY)
 
-    def _load_or_train_sentiment_model(self):
-        model_path = "models/sentiment_model.joblib"
-        vectorizer_path = "models/vectorizer.joblib"
-        
-        # Try to load existing model and vectorizer
-        if os.path.exists(model_path) and os.path.exists(vectorizer_path):
-            try:
-                self.model = joblib.load(model_path)
-                self.vectorizer = joblib.load(vectorizer_path)
-                logger.info("Loaded existing sentiment analysis model")
-                return
-            except Exception as e:
-                logger.warning(f"Error loading existing model: {str(e)}")
-
-        # Train new model if loading fails
-        logger.info("Training new sentiment analysis model")
-        reviews = self.review_repo.get_all()
-        
-        if not reviews:
-            logger.warning("No reviews found for training. Using rule-based sentiment analysis.")
-            self.model = None
-            self.vectorizer = None
-            return
-
-        # Prepare data
-        df = pd.DataFrame([{
-            'text': review.comment,
-            'sentiment': 1 if review.rating >= 4 else (0 if review.rating <= 2 else 0.5)
-        } for review in reviews])
-
-        # Initialize and fit vectorizer
-        self.vectorizer = TfidfVectorizer(max_features=5000)
-        X = self.vectorizer.fit_transform(df['text'])
-        y = df['sentiment']
-
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-        # Train model
-        self.model = XGBClassifier()
-        self.model.fit(X_train, y_train)
-
-        # Save model and vectorizer
-        os.makedirs("models", exist_ok=True)
-        joblib.dump(self.model, model_path)
-        joblib.dump(self.vectorizer, vectorizer_path)
-        logger.info("Trained and saved new sentiment analysis model")
-
-    def analyze_sentiment(self, text: str) -> float:
-        if not self.vectorizer or not self.model:
-            # Simple rule-based sentiment analysis as fallback
-            positive_words = {'good', 'great', 'excellent', 'amazing', 'love', 'best', 'perfect', 'wonderful', 'fantastic', 'awesome'}
-            negative_words = {'bad', 'poor', 'terrible', 'awful', 'worst', 'hate', 'disappointing', 'useless', 'waste', 'horrible'}
+    def find_product_by_name(self, product_name: str) -> Optional[int]:
+        """Find product ID by name using semantic search."""
+        try:
+            search_results = self.search_repo.semantic_search(
+                query=product_name,
+                collection_name="product_embeddings",
+                limit=1
+            )
             
-            words = text.lower().split()
-            positive_count = sum(1 for word in words if word in positive_words)
-            negative_count = sum(1 for word in words if word in negative_words)
+            if search_results and len(search_results) > 0:
+                best_match = search_results[0]
+                if best_match["score"] >= 0.7:
+                    return best_match["payload"]["product_id"]
             
-            total = positive_count + negative_count
-            if total == 0:
-                return 0.5  # Neutral if no sentiment words found
+            product = self.db.query(Product).filter(
+                Product.name.ilike(f"%{product_name}%")
+            ).first()
             
-            return positive_count / total
-        
-        # Transform text
-        X = self.vectorizer.transform([text])
-        
-        # Predict sentiment
-        sentiment = self.model.predict_proba(X)[0]
-        return float(sentiment[1])  # Return positive sentiment probability
+            return product.id if product else None
+        except Exception as e:
+            logger.error(f"Error finding product by name: {str(e)}")
+            return None
 
     def get_product_sentiment(self, product_id: int) -> dict:
+        """Get sentiment analysis for a product."""
         reviews = self.review_repo.get_by_product(product_id)
         if not reviews:
             return {
                 "average_rating": 0,
                 "sentiment_score": 0,
                 "total_reviews": 0,
-                "message": "No reviews available for this product"
+                "message": "Chưa có đánh giá nào cho sản phẩm này"
             }
 
-        # Calculate metrics
         total_reviews = len(reviews)
         average_rating = sum(review.rating for review in reviews) / total_reviews
-        
-        # Analyze sentiment for each review
-        sentiments = []
-        for review in reviews:
-            try:
-                sentiment = self.analyze_sentiment(review.comment)
-                sentiments.append(sentiment)
-            except Exception as e:
-                logger.error(f"Error analyzing sentiment for review {review.review_id}: {str(e)}")
-                continue
-
-        sentiment_score = sum(sentiments) / len(sentiments) if sentiments else 0
 
         return {
             "average_rating": round(average_rating, 2),
-            "sentiment_score": round(sentiment_score, 2),
+            "sentiment_score": round(average_rating / 5, 2),
             "total_reviews": total_reviews,
-            "message": "Analysis complete"
+            "message": "Phân tích hoàn tất"
         }
 
-    async def process_request(self, request: ReviewRequest) -> ReviewResponse:
+    async def process_request(self, request: Union[ReviewRequest, 'ChatbotRequest']) -> ReviewResponse:
         try:
+            # Convert ChatbotRequest to ReviewRequest if needed
+            if hasattr(request, 'entities'):
+                product_id = None
+                if request.entities and 'product_id' in request.entities:
+                    try:
+                        product_id = int(request.entities['product_id'])
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid product_id in entities: {request.entities.get('product_id')}")
+                
+                request = ReviewRequest(
+                    chat_id=request.chat_id,
+                    message=request.message,
+                    product_id=product_id,
+                    entities=request.entities
+                )
+
+            # Get product sentiment data if available
+            sentiment_data = None
             if request.product_id:
                 sentiment_data = self.get_product_sentiment(request.product_id)
-                return ReviewResponse(
-                    content=f"Product analysis: {sentiment_data['message']}\n"
-                           f"Average rating: {sentiment_data['average_rating']}\n"
-                           f"Sentiment score: {sentiment_data['sentiment_score']}\n"
-                           f"Total reviews: {sentiment_data['total_reviews']}",
-                    product_id=request.product_id,
-                    review_summary=sentiment_data,
-                    query_type="summary"
+
+            # Generate response using GPT
+            prompt = f"""Bạn là chuyên gia phân tích đánh giá sản phẩm của sàn thương mại điện tử IUH-Ecommerce.
+Hãy phân tích và tổng hợp các đánh giá thực tế từ người dùng để tư vấn cho khách hàng.
+
+Câu hỏi của khách hàng: {request.message}
+
+Thông tin đánh giá sản phẩm:
+{json.dumps(sentiment_data, ensure_ascii=False) if sentiment_data else "Không có thông tin đánh giá"}
+
+Yêu cầu:
+1. Nếu có thông tin đánh giá (có điểm trung bình và số lượng đánh giá):
+   - Mở đầu bằng lời chào và cảm ơn khách hàng
+   - Dựa trên {sentiment_data.get('total_reviews', 0) if sentiment_data else 0} đánh giá thực tế từ người dùng, phân tích:
+     * Những điểm được người dùng đánh giá cao nhất (dựa trên điểm trung bình {sentiment_data.get('average_rating', 0) if sentiment_data else 0}/5)
+     * Những vấn đề hoặc điểm yếu được người dùng đề cập nhiều nhất
+     * Cảm nhận chung của người dùng về sản phẩm
+   - Tổng hợp các ý kiến phổ biến nhất về:
+     * Chất lượng và độ bền
+     * Giá cả và giá trị
+     * Tính năng và hiệu quả
+     * Độ an toàn và độ tin cậy
+     * Trải nghiệm sử dụng
+   - Đưa ra kết luận dựa trên số liệu thực tế:
+     * Tỷ lệ người dùng hài lòng
+     * Những điểm cần lưu ý khi sử dụng
+     * Khuyến nghị dựa trên đánh giá của đa số người dùng
+   - KHÔNG sử dụng định dạng markdown hoặc ký tự đặc biệt
+   - KHÔNG đánh số các phần, thay vào đó sử dụng các từ nối tự nhiên
+   - KHÔNG nói "không có thông tin đánh giá" nếu đã có dữ liệu
+   - Đảm bảo câu trả lời hoàn chỉnh và có kết luận rõ ràng
+
+2. Nếu không có thông tin đánh giá (không có điểm trung bình hoặc số lượng đánh giá = 0):
+   - Hướng dẫn chi tiết cách tìm kiếm sản phẩm trên sàn
+   - Liệt kê các tiêu chí quan trọng cần xem xét khi mua sản phẩm
+   - Đề xuất cách đánh giá sản phẩm trước khi mua
+
+3. Giữ giọng điệu chuyên nghiệp và thân thiện
+4. KHÔNG sử dụng từ "None" trong phản hồi
+5. KHÔNG lặp lại thông tin đánh giá ở cuối câu trả lời
+"""
+
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Bạn là chuyên gia phân tích đánh giá sản phẩm của sàn thương mại điện tử IUH-Ecommerce. Hãy phân tích và tổng hợp các đánh giá thực tế từ người dùng để tư vấn cho khách hàng một cách chuyên nghiệp."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1000
+            )
+
+            content = response.choices[0].message.content
+            
+            # If no product_id but we have a product name in the response, try to find it
+            if not request.product_id:
+                # Extract product name from GPT response
+                product_name_prompt = f"""Trích xuất tên sản phẩm từ câu hỏi sau. Chỉ trả về tên sản phẩm, không có text khác.
+Câu hỏi: {request.message}"""
+                
+                product_name_response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Bạn là trợ lý trích xuất thông tin. Chỉ trả về tên sản phẩm, không có text khác."},
+                        {"role": "user", "content": product_name_prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=50
                 )
-            else:
-                sentiment = self.analyze_sentiment(request.message)
+                
+                product_name = product_name_response.choices[0].message.content.strip()
+                if product_name:
+                    found_product_id = self.find_product_by_name(product_name)
+                    if found_product_id:
+                        request.product_id = found_product_id
+                        sentiment_data = self.get_product_sentiment(found_product_id)
+                        # Generate new response with product information
+                        new_prompt = f"""Bạn là chuyên gia phân tích đánh giá sản phẩm của sàn thương mại điện tử IUH-Ecommerce.
+Hãy phân tích và tổng hợp các đánh giá thực tế từ người dùng để tư vấn cho khách hàng.
+
+Câu hỏi của khách hàng: {request.message}
+
+Thông tin đánh giá sản phẩm:
+{json.dumps(sentiment_data, ensure_ascii=False) if sentiment_data else "Không có thông tin đánh giá"}
+
+Yêu cầu:
+1. Mở đầu bằng lời chào và cảm ơn khách hàng
+2. Dựa trên {sentiment_data.get('total_reviews', 0) if sentiment_data else 0} đánh giá thực tế từ người dùng, phân tích:
+   - Những điểm được người dùng đánh giá cao nhất (dựa trên điểm trung bình {sentiment_data.get('average_rating', 0) if sentiment_data else 0}/5)
+   - Những vấn đề hoặc điểm yếu được người dùng đề cập nhiều nhất
+   - Cảm nhận chung của người dùng về sản phẩm
+3. Tổng hợp các ý kiến phổ biến nhất về:
+   - Chất lượng và độ bền
+   - Giá cả và giá trị
+   - Tính năng và hiệu quả
+   - Độ an toàn và độ tin cậy
+   - Trải nghiệm sử dụng
+4. Đưa ra kết luận dựa trên số liệu thực tế:
+   - Tỷ lệ người dùng hài lòng
+   - Những điểm cần lưu ý khi sử dụng
+   - Khuyến nghị dựa trên đánh giá của đa số người dùng
+5. Giữ giọng điệu chuyên nghiệp và thân thiện
+6. KHÔNG sử dụng định dạng markdown hoặc ký tự đặc biệt
+7. KHÔNG đánh số các phần, thay vào đó sử dụng các từ nối tự nhiên
+8. KHÔNG sử dụng từ "None" trong phản hồi
+9. KHÔNG lặp lại thông tin đánh giá ở cuối câu trả lời
+10. Đảm bảo câu trả lời hoàn chỉnh và có kết luận rõ ràng
+"""
+
+                        new_response = self.client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[
+                                {"role": "system", "content": "Bạn là chuyên gia phân tích đánh giá sản phẩm của sàn thương mại điện tử IUH-Ecommerce. Hãy phân tích và tổng hợp các đánh giá thực tế từ người dùng để tư vấn cho khách hàng một cách chuyên nghiệp."},
+                                {"role": "user", "content": new_prompt}
+                            ],
+                            temperature=0.7,
+                            max_tokens=1000
+                        )
+                        content = new_response.choices[0].message.content
+
                 return ReviewResponse(
-                    content=f"Text sentiment analysis: {round(sentiment, 2)}",
-                    query_type="sentiment"
+                content=content,
+                product_id=request.product_id,
+                review_summary=sentiment_data,
+                query_type="review"
                 )
+
         except Exception as e:
             logger.error(f"Unexpected error in process_request: {str(e)}")
             return ReviewResponse(
-                content=f"An error occurred while processing your request: {str(e)}",
+                content=f"Đã xảy ra lỗi khi xử lý yêu cầu: {str(e)}",
                 query_type="error"
             )
 
@@ -185,16 +241,6 @@ def analyze_reviews(product_id: int, db: Session = Depends(get_db)):
         return agent.get_product_sentiment(product_id)
     except Exception as e:
         logger.error(f"Error in analyze_reviews endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/sentiment")
-def analyze_text_sentiment(text: str, db: Session = Depends(get_db)):
-    try:
-        agent = ReviewAgent(db)
-        sentiment = agent.analyze_sentiment(text)
-        return {"sentiment_score": round(sentiment, 2)}
-    except Exception as e:
-        logger.error(f"Error in analyze_text_sentiment endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/analyze", response_model=ReviewResponse)

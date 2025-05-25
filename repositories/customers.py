@@ -125,3 +125,18 @@ class CustomerRepository:
         except Exception as e:
             logger.error(f"Lỗi khi xóa khách hàng với ID {customer_id}: {str(e)}")
             return False
+
+    @staticmethod
+    def check_customer(customer_id: int) -> bool:
+        """
+        Kiểm tra khách hàng có tồn tại hay không theo customer_id.
+        Trả về True nếu tồn tại, False nếu không.
+        """
+        try:
+            with Session() as session:
+                customer = session.get(Customer, customer_id)
+                return customer is not None
+        except Exception as e:
+            logger.error(f"Lỗi khi kiểm tra khách hàng với ID {customer_id}: {str(e)}")
+            return False
+        

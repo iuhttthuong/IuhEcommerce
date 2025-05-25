@@ -1,286 +1,167 @@
 from fastapi import HTTPException, APIRouter
 from autogen import AssistantAgent
 from loguru import logger
-from .base import config_list, BaseShopAgent, ShopChatRequest, ShopChatResponse
-from repositories.products import ProductRepositories
-from models.products import ProductUpdate
+from .base import BaseShopAgent, ShopRequest, ChatMessageRequest
+from repositories.inventory import InventoryRepository
+from repositories.search import SearchRepository
+from repositories.message import MessageRepository
+from models.inventories import Inventory, InventoryCreate
+from models.chats import ChatMessageCreate
 import json
 from typing import Dict, Any, Optional, List
+from datetime import datetime
 from sqlalchemy.orm import Session
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qdrant_models
+from env import env
+from services.search import SearchServices
+import traceback
 
 router = APIRouter(prefix="/shop/inventory", tags=["Shop Inventory"])
 
 class InventoryAgent(BaseShopAgent):
-    def __init__(self, shop_id: int, db: Session):
-        super().__init__(shop_id)
-        self.agent = AssistantAgent(
-            name="inventory_management_agent",
-            system_message="""Bạn là một trợ lý AI chuyên về quản lý tồn kho cho shop trên sàn thương mại điện tử IUH-Ecomerce.
-            Nhiệm vụ của bạn là:
-            1. Kiểm tra số lượng tồn kho hiện tại
-            2. Cập nhật số lượng tồn kho
-            3. Cảnh báo tồn kho thấp
-            4. Gợi ý lượng cần nhập thêm
-            5. Quản lý tồn kho theo SKU
-            
-            Bạn cần đảm bảo:
-            - Cập nhật tồn kho chính xác và kịp thời
-            - Cảnh báo sớm khi tồn kho thấp
-            - Đề xuất lượng nhập hàng phù hợp
-            - Theo dõi biến động tồn kho
-            """,
-            llm_config={"config_list": config_list},
-            human_input_mode="NEVER"
+    def __init__(self, shop_id: int = None):
+        super().__init__(
+            shop_id=shop_id,
+            name="InventoryAgent",
+            system_message="""Bạn là một trợ lý AI chuyên nghiệp làm việc cho sàn thương mại điện tử IUH-Ecommerce, chuyên tư vấn và hướng dẫn cho người bán về quản lý tồn kho.
+
+Nhiệm vụ của bạn:
+1. Hướng dẫn quản lý tồn kho
+2. Tư vấn tối ưu tồn kho
+3. Hỗ trợ xử lý các vấn đề về tồn kho
+4. Đề xuất cách tăng hiệu quả quản lý
+
+Các chức năng chính:
+1. Kiểm tra tồn kho:
+   - Xem số lượng tồn
+   - Kiểm tra trạng thái
+   - Theo dõi biến động
+   - Cảnh báo hết hàng
+   - Báo cáo tồn kho
+
+2. Quản lý nhập hàng:
+   - Tạo đơn nhập hàng
+   - Theo dõi đơn nhập
+   - Xác nhận nhận hàng
+   - Kiểm tra chất lượng
+   - Cập nhật tồn kho
+
+3. Quản lý xuất hàng:
+   - Xác nhận đơn hàng
+   - Kiểm tra tồn kho
+   - Cập nhật số lượng
+   - Theo dõi xuất hàng
+   - Báo cáo xuất hàng
+
+4. Tối ưu tồn kho:
+   - Phân tích nhu cầu
+   - Dự báo tồn kho
+   - Tối ưu đặt hàng
+   - Giảm chi phí tồn kho
+   - Tăng hiệu quả quản lý
+
+5. Xử lý vấn đề:
+   - Thất thoát hàng
+   - Sai số tồn kho
+   - Hàng hết hạn
+   - Hàng lỗi
+   - Hỗ trợ khẩn cấp
+
+Khi trả lời, bạn cần:
+- Tập trung vào lợi ích của người bán
+- Cung cấp hướng dẫn chi tiết
+- Đề xuất giải pháp tối ưu
+- Sử dụng ngôn ngữ chuyên nghiệp
+- Cung cấp ví dụ cụ thể
+- Nhấn mạnh các điểm quan trọng
+- Hướng dẫn từng bước khi cần"""
         )
-        self.product_repository = ProductRepositories(db)
+        self.message_repository = MessageRepository()
+        self.collection_name = "inventory_management_embeddings"
+        self.agent_name = "InventoryAgent"
 
-    async def process(self, request: ShopChatRequest) -> ShopChatResponse:
-        try:
-            # Get response from agent
-            response = await self.agent.a_generate_reply(
-                messages=[{"role": "user", "content": request.message}]
-            )
-            
-            # Parse the response to determine the action
-            action = self._parse_action(response)
-            
-            # Execute the appropriate action
-            if action["type"] == "check":
-                return await self._check_inventory(action["data"])
-            elif action["type"] == "update":
-                return await self._update_inventory(action["data"])
-            elif action["type"] == "alert":
-                return await self._check_low_inventory()
-            elif action["type"] == "suggest":
-                return await self._suggest_restock()
-            else:
-                return self._create_response("Tôi không hiểu yêu cầu của bạn. Vui lòng thử lại.")
-                
-        except Exception as e:
-            logger.error(f"Error in InventoryAgent: {str(e)}")
-            return self._create_response(
-                "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
-                {"error": str(e)}
-            )
+    def _build_prompt(self, query: str, context: str) -> str:
+        return (
+            f"Người bán hỏi: {query}\n"
+            f"Thông tin quản lý tồn kho liên quan:\n{context}\n"
+            "Hãy trả lời theo cấu trúc sau:\n"
+            "1. Tóm tắt vấn đề:\n"
+            "   - Mục đích và phạm vi\n"
+            "   - Đối tượng áp dụng\n"
+            "   - Tầm quan trọng\n\n"
+            "2. Hướng dẫn chi tiết:\n"
+            "   - Các bước thực hiện\n"
+            "   - Yêu cầu cần thiết\n"
+            "   - Lưu ý quan trọng\n\n"
+            "3. Quy trình xử lý:\n"
+            "   - Các bước thực hiện\n"
+            "   - Thời gian xử lý\n"
+            "   - Tài liệu cần thiết\n\n"
+            "4. Tối ưu và cải thiện:\n"
+            "   - Cách tối ưu\n"
+            "   - Cải thiện hiệu quả\n"
+            "   - Tăng trải nghiệm\n\n"
+            "5. Khuyến nghị:\n"
+            "   - Giải pháp tối ưu\n"
+            "   - Cải thiện quy trình\n"
+            "   - Tăng hiệu quả\n\n"
+            "Trả lời cần:\n"
+            "- Chuyên nghiệp và dễ hiểu\n"
+            "- Tập trung vào lợi ích của người bán\n"
+            "- Cung cấp hướng dẫn chi tiết\n"
+            "- Đề xuất giải pháp tối ưu\n"
+            "- Cung cấp ví dụ cụ thể"
+        )
 
-    def _parse_action(self, response):
-        try:
-            data = json.loads(response)
-            return {
-                "type": data.get("action", "unknown"),
-                "data": data.get("data", {})
-            }
-        except:
-            return {"type": "unknown", "data": {}}
+    def _get_response_title(self, query: str) -> str:
+        return f"Quản lý tồn kho - {query.split()[0] if query else 'Hỗ trợ'}"
 
-    async def _check_inventory(self, data) -> ShopChatResponse:
-        try:
-            product_id = data.get("product_id")
-            if product_id:
-                # Check specific product
-                product = await ProductRepositories.get_by_id(product_id)
-                if not product or product.shop_id != self.shop_id:
-                    return self._create_response("Không tìm thấy sản phẩm")
-                return self._create_response(
-                    "Thông tin tồn kho sản phẩm",
-                    {
-                        "product_id": product_id,
-                        "name": product.name,
-                        "current_stock": product.stock_quantity
-                    }
-                )
-            else:
-                # Check all products
-                products = await ProductRepositories.get_by_shop_id(self.shop_id)
-                return self._create_response(
-                    "Danh sách tồn kho",
-                    {
-                        "inventory": [{
-                            "product_id": p.product_id,
-                            "name": p.name,
-                            "current_stock": p.stock_quantity
-                        } for p in products]
-                    }
-                )
-        except Exception as e:
-            logger.error(f"Error checking inventory: {str(e)}")
-            return self._create_response(
-                "Đã có lỗi xảy ra khi kiểm tra tồn kho. Vui lòng thử lại sau.",
-                {"error": str(e)}
-            )
+    def _get_fallback_response(self) -> str:
+        return "Xin lỗi, tôi không thể tìm thấy thông tin chi tiết về vấn đề này. Vui lòng liên hệ bộ phận hỗ trợ shop để được tư vấn cụ thể hơn."
 
-    async def _update_inventory(self, data) -> ShopChatResponse:
-        try:
-            product_id = data.get("product_id")
-            new_stock = data.get("stock")
-            
-            if not product_id or new_stock is None:
-                return self._create_response("ID sản phẩm và số lượng tồn kho là bắt buộc")
-            
-            # Verify product belongs to shop
-            product = await ProductRepositories.get_by_id(product_id)
-            if not product or product.shop_id != self.shop_id:
-                return self._create_response("Không tìm thấy sản phẩm")
-            
-            # Update stock
-            update_data = ProductUpdate(stock_quantity=new_stock)
-            updated_product = await ProductRepositories.update(product_id, update_data)
-            
-            return self._create_response(
-                "Tồn kho đã được cập nhật thành công",
-                {
-                    "product_id": product_id,
-                    "new_stock": new_stock
-                }
-            )
-        except Exception as e:
-            logger.error(f"Error updating inventory: {str(e)}")
-            return self._create_response(
-                "Đã có lỗi xảy ra khi cập nhật tồn kho. Vui lòng thử lại sau.",
-                {"error": str(e)}
-            )
-
-    async def _check_low_inventory(self) -> ShopChatResponse:
-        try:
-            # Get all products for shop
-            products = await ProductRepositories.get_by_shop_id(self.shop_id)
-            
-            # Define low stock threshold (e.g., 10 units)
-            LOW_STOCK_THRESHOLD = 10
-            
-            # Filter products with low stock
-            low_stock_products = [
-                {
-                    "product_id": p.product_id,
-                    "name": p.name,
-                    "current_stock": p.stock_quantity
-                }
-                for p in products
-                if p.stock_quantity <= LOW_STOCK_THRESHOLD
-            ]
-            
-            return self._create_response(
-                "Danh sách sản phẩm tồn kho thấp",
-                {
-                    "low_stock_products": low_stock_products,
-                    "threshold": LOW_STOCK_THRESHOLD
-                }
-            )
-        except Exception as e:
-            logger.error(f"Error checking low inventory: {str(e)}")
-            return self._create_response(
-                "Đã có lỗi xảy ra khi kiểm tra tồn kho thấp. Vui lòng thử lại sau.",
-                {"error": str(e)}
-            )
-
-    async def _suggest_restock(self) -> ShopChatResponse:
-        try:
-            # Get all products for shop
-            products = await ProductRepositories.get_by_shop_id(self.shop_id)
-            
-            # Define restock thresholds and suggestions
-            RESTOCK_THRESHOLD = 20
-            SUGGESTED_RESTOCK = 50
-            
-            restock_suggestions = []
-            for product in products:
-                if product.stock_quantity <= RESTOCK_THRESHOLD:
-                    restock_suggestions.append({
-                        "product_id": product.product_id,
-                        "name": product.name,
-                        "current_stock": product.stock_quantity,
-                        "suggested_restock": SUGGESTED_RESTOCK
-                    })
-            
-            return self._create_response(
-                "Đề xuất nhập hàng",
-                {
-                    "restock_suggestions": restock_suggestions,
-                    "threshold": RESTOCK_THRESHOLD,
-                    "suggested_quantity": SUGGESTED_RESTOCK
-                }
-            )
-        except Exception as e:
-            logger.error(f"Error suggesting restock: {str(e)}")
-            return self._create_response(
-                "Đã có lỗi xảy ra khi đề xuất nhập hàng. Vui lòng thử lại sau.",
-                {"error": str(e)}
-            )
+    async def process(self, request: ShopRequest) -> Dict[str, Any]:
+        # Placeholder implementation. Replace with actual logic as needed.
+        return {
+            "response": {
+                "title": self._get_response_title(request.message),
+                "content": "Inventory management processing not yet implemented.",
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            },
+            "agent": self.name,
+            "context": {
+                "search_results": [],
+                "shop_id": request.shop_id
+            },
+            "timestamp": datetime.now().isoformat()
+        }
 
 class Inventory:
     def __init__(self, db: Session):
         self.db = db
-        self.agent = InventoryAgent(shop_id=1, db=db)  # Pass db to InventoryAgent
-        self.product_repository = ProductRepositories(db)
-
-    async def check_stock(self, product_id: int, quantity: int) -> bool:
-        """Check if there is enough stock for a product"""
-        try:
-            product = await self.product_repository.get_by_id(product_id)
-            if not product:
-                return False
-            return product.stock_quantity >= quantity
-        except Exception as e:
-            logger.error(f"Error checking stock: {str(e)}")
-            return False
-
-    async def update_stock(self, product_id: int, quantity_change: int) -> Dict[str, Any]:
-        """Update product stock quantity"""
-        try:
-            product = await self.product_repository.get_by_id(product_id)
-            if not product:
-                raise HTTPException(status_code=404, detail="Product not found")
-            
-            new_quantity = product.stock_quantity + quantity_change
-            if new_quantity < 0:
-                raise HTTPException(status_code=400, detail="Insufficient stock")
-            
-            update_data = ProductUpdate(stock_quantity=new_quantity)
-            updated_product = await self.product_repository.update(product_id, update_data)
-            
-            return {
-                "product_id": product_id,
-                "old_stock": product.stock_quantity,
-                "new_stock": new_quantity,
-                "change": quantity_change
-            }
-        except Exception as e:
-            logger.error(f"Error updating stock: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-    async def get_low_stock_products(self, threshold: int = 10) -> List[Dict[str, Any]]:
-        """Get list of products with low stock"""
-        try:
-            products = await self.product_repository.get_by_shop(self.agent.shop_id)
-            low_stock_products = [
-                {
-                    "product_id": p.product_id,
-                    "name": p.name,
-                    "current_stock": p.stock_quantity
-                }
-                for p in products
-                if p.stock_quantity <= threshold
-            ]
-            return low_stock_products
-        except Exception as e:
-            logger.error(f"Error getting low stock products: {str(e)}")
-            return []
-
-    async def get_total_inventory_value(self) -> float:
-        """Calculate total inventory value"""
-        try:
-            products = await self.product_repository.get_by_shop(self.agent.shop_id)
-            total_value = sum(p.price * p.stock_quantity for p in products)
-            return total_value
-        except Exception as e:
-            logger.error(f"Error calculating total inventory value: {str(e)}")
-            return 0.0
+        self.agent = InventoryAgent()
+        self.inventory_repository = InventoryRepository(db)
 
     async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process an inventory management request"""
         try:
-            response = await self.agent.process_request(ShopChatRequest(**request))
-            return response.dict()
+            # Lấy thông tin tồn kho của shop
+            shop_id = request.get('shop_id')
+            if shop_id:
+                inventory = await self.inventory_repository.get_by_virtual_type(shop_id)
+                if inventory:
+                    inventory_info = "\n".join([
+                        f"- {item.product_id}: {item.current_stock} sản phẩm"
+                        for item in inventory
+                    ])
+                    request['message'] = f"Thông tin tồn kho của shop:\n{inventory_info}"
+                else:
+                    request['message'] = "Shop chưa có sản phẩm nào trong tồn kho."
+            else:
+                request['message'] = "Không tìm thấy thông tin shop."
+
+            response = await self.agent.process_request(ShopRequest(**request))
+            return response
         except Exception as e:
             logger.error(f"Error processing request: {str(e)}")
             return {
@@ -289,8 +170,29 @@ class Inventory:
                 "error": str(e)
             }
 
-# Add router endpoints
+@router.post("/query")
+async def query_inventory(request: ChatMessageRequest):
+    try:
+        inventory = Inventory(Session())
+        # Convert to ShopRequest format
+        shop_request = ShopRequest(
+            message=request.content,
+            chat_id=request.chat_id,
+            shop_id=request.sender_id if request.sender_type == "shop" else None,
+            user_id=request.sender_id if request.sender_type == "user" else None,
+            context=request.message_metadata if request.message_metadata else {},
+            entities={},
+            agent_messages=[],
+            filters={}
+        )
+        response = await inventory.process_request(shop_request.dict())
+        return response
+    except Exception as e:
+        logger.error(f"Error in query_inventory: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/")
-async def get_inventory():
-    """Get shop inventory"""
-    return {"message": "Get inventory endpoint"} 
+async def list_inventory():
+    """List all inventory items in a shop"""
+    return {"message": "List inventory endpoint"} 

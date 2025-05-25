@@ -115,45 +115,39 @@ def retrieve_relevant_context(query_text: str, limit_per_collection: int = 3, sc
 
 def chat_completion_with_context(user_message: str, chat_history: List[Dict[str, str]] = None) -> Dict[str, Any]:
     """
-    Generate a chat completion with OpenAI, using relevant context
+    Generate a chat completion with OpenAI, using relevant context and advanced policy prompt
     """
     if chat_history is None:
         chat_history = []
-    
     try:
         # Retrieve relevant context
         context = retrieve_relevant_context(user_message)
-        
-        # Prepare messages for OpenAI
+        # Nếu context quá ngắn, bổ sung hướng dẫn mở rộng và tìm nguồn ngoài
+        context_length = len(context.strip())
+        supplement_instruction = ""
+        if context_length < 50:
+            supplement_instruction = (
+                "\n\nLưu ý: Context hiện tại rất ngắn hoặc chưa đủ. Hãy chủ động phân tích, mở rộng, so sánh với chính sách các sàn lớn (Shopee, Lazada, Tiki) và bổ sung thông tin từ nguồn chính thống (website pháp luật, sàn TMĐT lớn) nếu cần."
+            )
+        # Prompt chuyên sâu cho PolicyAgent
+        system_prompt = f"""
+Bạn là chuyên gia tư vấn chính sách cho shop trên IUH-Ecommerce.\n\nDưới đây là thông tin context nội bộ (nếu có):\n{context}{supplement_instruction}\n\nYêu cầu:\n- Luôn phân tích, mở rộng và so sánh chính sách với các sàn lớn (Shopee, Lazada, Tiki) nếu có thể.\n- Nếu context ngắn hoặc chưa đủ, hãy bổ sung thông tin từ nguồn chính thống (website pháp luật, sàn TMĐT lớn).\n- Trả lời theo cấu trúc: [Tóm tắt] → [Phân tích chi tiết] → [Đề xuất hành động] → [Nguồn tham khảo].\n- Luôn ưu tiên quyền lợi shop nhưng đảm bảo tuân thủ pháp luật.\n- Trả lời bằng markdown.\n"""
         messages = [
-            {"role": "system", "content": f"""You are a helpful e-commerce assistant for a Vietnamese online shop.
-             Answer the user's questions based on the following context. 
-             If you don't know the answer based on the provided context, say so politely.
-             Context: {context}"""}
+            {"role": "system", "content": system_prompt}
         ]
-        
-        # Add chat history
         messages.extend(chat_history)
-        
-        # Add the current user message
         messages.append({"role": "user", "content": user_message})
-        
-        # Call OpenAI API
         response = openai.chat.completions.create(
-            model="gpt-4o-mini",  # or any preferred model
+            model="gpt-4o-mini",
             messages=messages,
             temperature=0.7,
-            max_tokens=500
+            max_tokens=700
         )
-        
-        # Extract and return the response
         assistant_message = response.choices[0].message.content
-        
         return {
             "response": assistant_message,
             "total_tokens": response.usage.total_tokens
         }
-    
     except Exception as e:
         print(f"⚠️ Error generating chat completion: {e}")
         return {

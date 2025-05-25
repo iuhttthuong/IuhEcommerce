@@ -25,8 +25,8 @@ class MessageService:
         return MessageRepository.get_recent_messages(chat_id, limit)
 
     @staticmethod
-    def get_all_messages_in_chat(chat_id: int) -> List[ChatMessageResponse]:
-        return MessageRepository.get_all_messages_in_chat(chat_id)
+    def get_all_messages_in_chat(chat_id: int, limit = 30) -> List[ChatMessageResponse]:
+        return MessageRepository.get_all_messages_in_chat(chat_id, limit)
 
     @staticmethod
     def create_agent_message(payload: ChatMessageCreate) -> ChatMessageResponse:
@@ -47,3 +47,9 @@ class MessageService:
     @staticmethod
     def get_agent_conversation_history(agent_id: str, chat_id: int, limit: int = 10) -> List[ChatMessageResponse]:
         return MessageRepository.get_conversation_history(agent_id, chat_id, limit)
+
+    @staticmethod
+    def get_sender_type_and_content(chat_id: int, limit=30) -> list[dict]:
+        return MessageRepository.get_sender_type_and_content(chat_id, limit)
+    
+    

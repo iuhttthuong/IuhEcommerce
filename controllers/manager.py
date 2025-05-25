@@ -9,6 +9,7 @@ from repositories.message import MessageRepository
 from controllers.search import search
 import traceback
 from models.chats import ChatMessage, ChatMessageCreate, ChatCreate
+from models.chatbot_models import ChatbotRequest, AgentMessage, AgentResponse
 from autogen import register_function
 from env import env
 from typing import Optional, Dict, Any, List
@@ -24,6 +25,10 @@ from controllers.product_info_agent import ProductInfoAgent
 from controllers.review_agent import ReviewAgent
 from controllers.product_comparison_agent import ProductComparisonAgent
 from services.manager import ManagerService
+from controllers.synthetic import chatbot_reply, chatbot_output
+
+
+api_url =  "http://localhost:8000"
 
 router = APIRouter(prefix="/manager", tags=["Manager"])
 # Lấy cấu hình model từ môi trường
@@ -34,28 +39,6 @@ config_list = [
         "api_type": "google"
     }
 ]
-
-class AgentMessage(BaseModel):
-    agent_id: str
-    agent_type: str
-    content: str
-    metadata: Optional[Dict[str, Any]] = None
-
-class AgentResponse(BaseModel):
-    agent_id: str
-    agent_type: str
-    content: str
-    metadata: Optional[Dict[str, Any]] = None
-
-class ChatbotRequest(BaseModel):
-    chat_id: int
-    message: str
-    context: dict = None
-    user_id: Optional[int] = None
-    shop_id: Optional[int] = None
-    entities: Optional[Dict[str, Any]] = None
-    agent_messages: Optional[List[AgentMessage]] = None
-    filters: Optional[Dict[str, Any]] = None
 
 Manager = ConversableAgent(
     name="manager",
@@ -209,8 +192,21 @@ async def call_agent(agent, request: ChatbotRequest):
             product_info_agent = ProductInfoAgent()
             result = await product_info_agent.process_request(request)
         elif agent == "ReviewAgent":
-            review_agent = ReviewAgent()
-            result = await review_agent.process_request(request)
+            db = Session()
+            try:
+                review_agent = ReviewAgent(db)
+                result = await review_agent.process_request(request)
+                # Convert ReviewResponse to dict format
+                result = {
+                    "message": result.content,
+                    "type": "review",
+                    "data": {
+                        "product_id": result.product_id,
+                        "review_summary": result.review_summary
+                    }
+                }
+            finally:
+                db.close()
         elif agent == "ProductComparisonAgent":
             comparison_agent = ProductComparisonAgent()
             result = await comparison_agent.process_request(request)
@@ -243,7 +239,7 @@ async def call_agent(agent, request: ChatbotRequest):
             sender_id=agent_id,
             message_metadata={"agent_type": agent_type}
         )
-        MessageRepository.create_message(message_payload)
+        # MessageRepository.create_message(message_payload)
 
         # Convert AgentResponse to dict for database storage
         response_metadata = {
@@ -255,9 +251,11 @@ async def call_agent(agent, request: ChatbotRequest):
             }
         }
 
+        final_agent_response = await chatbot_output(agent_response.content )
+        print(f"🤣💕🤣➡️🤷‍♂️❎{final_agent_response}")
         response_payload = ChatMessageCreate(
             chat_id=request.chat_id,
-            content=agent_response.content,
+            content=final_agent_response,
             sender_type="agent_response",
             sender_id=agent_id,
             message_metadata=response_metadata
@@ -329,6 +327,10 @@ async def ask_chatbot(request: ChatbotRequest):
             )
             MessageRepository.create_message(message_payload)
 
+            # Gửi tin nhắn đến chatbot để lấy prompt
+            message = await chatbot_reply(message, chat_id = request.chat_id , api_url = api_url)
+
+            
             # Process message and get agent response
             response = await get_product_info(message)
             agent = response.get("agent")
@@ -337,6 +339,7 @@ async def ask_chatbot(request: ChatbotRequest):
             if agent and query:
                 result = await call_agent(agent, request)
                 return result
+                
             else:
                 return {
                     "message": "Xin lỗi, tôi không thể xử lý yêu cầu của bạn lúc này.",

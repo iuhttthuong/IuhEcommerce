@@ -19,13 +19,13 @@ from env import env
 from db import get_db
 import json
 from loguru import logger
-from .base import ShopChatRequest, ShopChatResponse
+from .base import ShopRequest, ChatMessageRequest, process_shop_chat
 
 class ShopManager:
-    def __init__(self, db: Session = Depends(get_db)):
+    def __init__(self, db: Session = Depends(get_db), shop_id: int = None):
         self.product_mgmt = ProductManagement(db)
         self.inventory = Inventory(db)
-        self.marketing = Marketing(db)
+        self.marketing = Marketing(db, shop_id)
         self.customer_service = CustomerService(db)
         self.analytics = Analytics(db)
         self.chat_repo = ChatRepository(db)
@@ -133,7 +133,7 @@ class ShopManager:
             if agent == "ProductManagementAgent":
                 print("[DEBUG] Đã vào nhánh ProductManagementAgent, gọi _handle_list_products")
                 product_agent = ProductManagementAgent(shop_id=context['shop_id'], db=self.db)
-                result = await product_agent._handle_list_products(ShopChatRequest(message=query, context=context))
+                result = await product_agent._handle_list_products(ShopRequest(message=query, context=context))
                 await self.chat_repo.save_message(message, result.message, context)
                 print(f"[DEBUG] Đã trả về kết quả liệt kê sản phẩm: {result.message}")
                 return {
@@ -251,4 +251,21 @@ class ShopManager:
             "total_products": await self.product_mgmt.get_total_products(),
             "total_customers": await self.customer_service.get_total_customers(),
             "inventory_value": await self.inventory.get_total_inventory_value()
-        } 
+        }
+
+    async def process_request(self, request: ShopRequest) -> Dict[str, Any]:
+        """Process a shop management request"""
+        try:
+            # Route to appropriate handler based on request type
+            if "inventory" in request.message.lower():
+                return await self.inventory.process_request(request.dict())
+            else:
+                # Default to general shop chat
+                return await process_shop_chat(request)
+        except Exception as e:
+            logger.error(f"Error in process_request: {str(e)}")
+            return {
+                "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error",
+                "error": str(e)
+            } 

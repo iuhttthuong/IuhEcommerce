@@ -710,14 +710,20 @@ class RecommendationAgent:
                 
             # Add product details
             for i, product in enumerate(recommendations[:5], 1):
-                name = product.get("name", "Sản phẩm không tên")
-                price = product.get("price", 0)
-                description = product.get("description", "")
+                product_data = product.get('payload', {})
+                name = product_data.get('name', 'Sản phẩm không tên')
+                price = product_data.get('price', 0)
+                rating = product_data.get('rating_average', 0)
+                short_description = product_data.get('short_description', '')
                 
                 # Format description to keep it short
-                short_description = description[:100] + "..." if description and len(description) > 100 else description
+                if short_description:
+                    short_description = short_description[:100] + "..." if len(short_description) > 100 else short_description
                 
-                response += f"{i}. **{name}** - {price:,} VND\n"
+                response += f"{i}. **{name}** - {price:,} VND"
+                if rating:
+                    response += f" (⭐ {rating})"
+                response += "\n"
                 if short_description:
                     response += f"   {short_description}\n"
                 response += "\n"
@@ -734,7 +740,7 @@ class RecommendationAgent:
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             # Fallback response
-            product_names = ", ".join([p.get("name", "Sản phẩm") for p in recommendations[:3]])
+            product_names = ", ".join([p.get('payload', {}).get('name', 'Sản phẩm') for p in recommendations[:3]])
             return f"Tôi đã tìm thấy một số sản phẩm có thể phù hợp với bạn: {product_names}."
 
     async def process_recommendation(self, request: RecommendationRequest) -> RecommendationResponse:

@@ -49,8 +49,8 @@ def get_recent_messages(chat_id: int, limit: int = 5):
     return messages
 
 @router.get("/all/{chat_id}", response_model=list[ChatMessageResponse])
-def get_all_messages_in_chat(chat_id: int):
-    messages = MessageService.get_all_messages_in_chat(chat_id)
+def get_all_messages_in_chat(chat_id: int, limit:int =  30 ):
+    messages = MessageService.get_all_messages_in_chat(chat_id, limit)
     return messages
 
 @router.post("/agent", response_model=AgentMessageResponse, status_code=status.HTTP_201_CREATED)
@@ -66,3 +66,7 @@ def get_agent_messages(agent_id: str, limit: int = 10):
 def get_agent_chat_messages(agent_id: str, chat_id: int):
     messages = MessageService.get_agent_chat_messages(agent_id, chat_id)
     return messages
+
+@router.post("/sender_and_content/chat/{chat_id}")
+def get_sender_type_and_content(chat_id: int, limit: int =  30):
+    return MessageService.get_sender_type_and_content(chat_id, limit)
