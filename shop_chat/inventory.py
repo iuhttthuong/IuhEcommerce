@@ -142,33 +142,83 @@ class Inventory:
         self.agent = InventoryAgent()
         self.inventory_repository = InventoryRepository(db)
 
-    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process an inventory management request"""
         try:
             # Lấy thông tin tồn kho của shop
             shop_id = request.get('shop_id')
-            if shop_id:
-                inventory = await self.inventory_repository.get_by_virtual_type(shop_id)
-                if inventory:
-                    inventory_info = "\n".join([
-                        f"- {item.product_id}: {item.current_stock} sản phẩm"
-                        for item in inventory
-                    ])
-                    request['message'] = f"Thông tin tồn kho của shop:\n{inventory_info}"
-                else:
-                    request['message'] = "Shop chưa có sản phẩm nào trong tồn kho."
-            else:
-                request['message'] = "Không tìm thấy thông tin shop."
+            if not shop_id:
+                return {
+                    "message": "Không tìm thấy thông tin shop.",
+                    "type": "error"
+                }
 
-            response = await self.agent.process_request(ShopRequest(**request))
+            # Lấy thông tin tồn kho
+            inventory = await self.inventory_repository.get_by_virtual_type(shop_id)
+            if not inventory:
+                return {
+                    "message": "Shop chưa có sản phẩm nào trong tồn kho.",
+                    "type": "text",
+                    "data": {
+                        "total_items": 0,
+                        "inventory": []
+                    }
+                }
+
+            # Format thông tin tồn kho
+            inventory_info = []
+            total_value = 0
+            for item in inventory:
+                product_info = {
+                    "product_id": item.product_id,
+                    "current_stock": item.current_stock,
+                    "fulfillment_type": item.fulfillment_type,
+                    "product_virtual_type": item.product_virtual_type
+                }
+                inventory_info.append(product_info)
+                # Tính tổng giá trị tồn kho nếu có thông tin giá
+                if hasattr(item, 'price'):
+                    total_value += item.price * item.current_stock
+
+            # Tạo response
+            response = {
+                "message": f"Thông tin tồn kho của shop:\n" + "\n".join([
+                    f"- Sản phẩm ID {item['product_id']}: {item['current_stock']} sản phẩm"
+                    for item in inventory_info
+                ]),
+                "type": "text",
+                "data": {
+                    "total_items": len(inventory_info),
+                    "total_value": total_value,
+                    "inventory": inventory_info
+                }
+            }
+
+            # Thêm thông tin chi tiết nếu có yêu cầu cụ thể
+            message = request.get('message', '').lower()
+            if 'chi tiết' in message or 'detail' in message:
+                response['message'] += "\n\nChi tiết tồn kho:\n" + "\n".join([
+                    f"- Sản phẩm ID {item['product_id']}:\n"
+                    f"  + Số lượng: {item['current_stock']}\n"
+                    f"  + Loại fulfillment: {item['fulfillment_type']}\n"
+                    f"  + Loại sản phẩm: {item['product_virtual_type']}"
+                    for item in inventory_info
+                ])
+
             return response
+
         except Exception as e:
-            logger.error(f"Error processing request: {str(e)}")
+            logger.error(f"Error processing inventory request: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {
                 "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
                 "type": "error",
                 "error": str(e)
             }
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Alias for process method to maintain backward compatibility"""
+        return await self.process(request)
 
 @router.post("/query")
 async def query_inventory(request: ChatMessageRequest):
@@ -185,7 +235,7 @@ async def query_inventory(request: ChatMessageRequest):
             agent_messages=[],
             filters={}
         )
-        response = await inventory.process_request(shop_request.dict())
+        response = await inventory.process(shop_request.dict())
         return response
     except Exception as e:
         logger.error(f"Error in query_inventory: {str(e)}")

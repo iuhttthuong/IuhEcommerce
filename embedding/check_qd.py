@@ -15,7 +15,7 @@ scroll_result = client.scroll(
     collection_name=collection_name,
     with_payload=True,
     with_vectors=True,
-    limit=1000  # tăng giới hạn nếu bạn có nhiều dữ liệu
+    limit=5000  # tăng giới hạn nếu bạn có nhiều dữ liệu
 )
 
 # Chuyển thành DataFrame

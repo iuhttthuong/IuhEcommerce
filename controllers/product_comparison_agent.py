@@ -28,7 +28,7 @@ class ComparisonResponse(BaseModel):
     products: List[Dict[str, Any]] = Field(default_factory=list, description="Danh sách sản phẩm so sánh")
     comparison_table: Dict[str, List[Any]] = Field(default_factory=dict, description="Bảng so sánh các thuộc tính")
     comparison_summary: str = Field("", description="Tóm tắt so sánh")
-    
+
 class ProductComparisonAgent:
     def __init__(self):
         self.llm_config = {
@@ -74,7 +74,7 @@ class ProductComparisonAgent:
             human_input_mode="NEVER"
         )
 
-    def _extract_comparison_query(self, response: str) -> Dict[str, Any]:
+    def _extract_comparison_query(self, response: str, fallback_names: list = None) -> Dict[str, Any]:
         try:
             # Tìm JSON trong kết quả
             json_start = response.find('{')
@@ -85,6 +85,13 @@ class ProductComparisonAgent:
                 return json.loads(json_str)
             else:
                 logger.warning(f"Không tìm thấy JSON trong phản hồi: {response}")
+                # Nếu có fallback_names, tạo product_identifiers từ đó
+                if fallback_names:
+                    return {
+                        "product_identifiers": [{"type": "name", "value": name} for name in fallback_names],
+                        "comparison_criteria": ["giá", "thông số kỹ thuật", "đánh giá"],
+                        "focus": "all"
+                    }
                 return {
                     "product_identifiers": [],
                     "comparison_criteria": ["giá", "thông số kỹ thuật", "đánh giá"],
@@ -110,13 +117,10 @@ class ProductComparisonAgent:
 
     def _find_products(self, product_identifiers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         products = []
-        
         for identifier in product_identifiers:
             id_type = identifier.get("type")
             value = identifier.get("value")
-            
             if id_type == "id" and isinstance(value, int):
-                # Query directly by ID
                 product = ProductServices(self.db).get(value)
                 if product:
                     product_dict = product.__dict__.copy()
@@ -127,6 +131,11 @@ class ProductComparisonAgent:
                 try:
                     # First try direct database search
                     search_results = ProductServices(self.db).search(value)
+                    if not search_results:
+                        # Thử tìm kiếm gần đúng (ví dụ: lower, không dấu, LIKE)
+                        from unidecode import unidecode
+                        value_fuzzy = unidecode(value).lower()
+                        search_results = ProductServices(self.db).search(value_fuzzy)
                     if search_results:
                         product = search_results[0]
                         product_dict = product.__dict__.copy()
@@ -166,6 +175,8 @@ class ProductComparisonAgent:
                 except Exception as e:
                     logger.error(f"Error searching for product '{value}': {str(e)}")
                     continue
+        if not products:
+            logger.warning(f"Không tìm thấy sản phẩm với các tên: {[id.get('value') for id in product_identifiers]}")
         return products
 
     def _extract_common_attributes(self, products: List[Dict[str, Any]]) -> List[str]:
@@ -325,7 +336,10 @@ class ProductComparisonAgent:
             
         return response
 
-    async def process_request(self, request: Union[ComparisonRequest, 'ChatbotRequest']) -> ComparisonResponse:
+    async def process_request(self, request: Union[ComparisonRequest, Any]) -> ComparisonResponse:
+        print(f"❎✅💣➡️💕❗😊😘Processing request: {request}")
+
+        
         try:
             # Convert ChatbotRequest to ComparisonRequest if needed
             if hasattr(request, 'entities'):
@@ -335,7 +349,6 @@ class ProductComparisonAgent:
                         product_ids = request.entities['product_ids']
                     except (ValueError, TypeError):
                         logger.warning(f"Invalid product_ids in entities: {request.entities.get('product_ids')}")
-                
                 request = ComparisonRequest(
                     chat_id=request.chat_id,
                     message=request.message,
@@ -343,16 +356,28 @@ class ProductComparisonAgent:
                     entities=request.entities
                 )
 
+            # Lấy fallback_names từ entities nếu có
+            fallback_names = None
+            if hasattr(request, 'entities') and request.entities:
+                # Thử lấy tên sản phẩm từ entities['Sản_phẩm'] dạng list dict
+                san_pham_list = request.entities.get('Sản_phẩm') or request.entities.get('san_pham')
+                if san_pham_list and isinstance(san_pham_list, list):
+                    fallback_names = []
+                    for sp in san_pham_list:
+                        if isinstance(sp, dict):
+                            ten = sp.get('Tên') or sp.get('ten') or sp.get('name')
+                            if ten:
+                                fallback_names.append(ten)
+            
             # Get comparison query from LLM
             response = await self.agent.a_generate_reply(
                 messages=[{"role": "user", "content": request.message}]
             )
-            
             # Extract comparison query
             if isinstance(response, str):
-                comparison_query = self._extract_comparison_query(response)
+                comparison_query = self._extract_comparison_query(response, fallback_names)
             else:
-                comparison_query = self._extract_comparison_query(response.get('content', ''))
+                comparison_query = self._extract_comparison_query(response.get('content', ''), fallback_names)
             
             # Find products to compare
             products = []
@@ -410,4 +435,6 @@ async def compare_products(request: ComparisonRequest):
         return response
     except Exception as e:
         logger.error(f"Lỗi trong compare_products endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Đã xảy ra lỗi khi xử lý yêu cầu: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Đã xảy ra lỗi khi xử lý yêu cầu: {str(e)}")
+
+# request = ComparisonRequest(chat_id= 1, message="So sánh sản phẩm A và B", product_ids=[1, 2])

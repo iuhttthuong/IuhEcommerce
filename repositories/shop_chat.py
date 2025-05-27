@@ -70,3 +70,8 @@ class ShopChatRepository:
             .order_by(ShopChatSession.updated_at.desc())\
             .limit(limit)\
             .all() 
+
+    def check_shop_by_shop_id(self, shop_id: int) -> bool:
+        """Check if a shop exists by shop_id"""
+        session = self.db.query(ShopChatSession).filter(ShopChatSession.shop_id == shop_id).first()
+        return session is not None

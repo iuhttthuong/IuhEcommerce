@@ -36,10 +36,14 @@ class ChatRepository:
                 session.delete(chat)
                 session.commit()
 
-
-
     @staticmethod
     def get_chat_by_user_id(user_id: int) -> list[ChatResponse]:
         with Session() as session:
             chats = session.query(Chat).filter(Chat.customer_id == user_id).all()
+            return [ChatResponse.model_validate(chat) for chat in chats]
+
+    @staticmethod
+    def get_chat_by_shop_id(shop_id: int) -> list[ChatResponse]:
+        with Session() as session:
+            chats = session.query(Chat).filter(Chat.shop_id == shop_id).all()
             return [ChatResponse.model_validate(chat) for chat in chats]

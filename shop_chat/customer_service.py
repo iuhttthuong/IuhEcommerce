@@ -3,6 +3,8 @@ from autogen import AssistantAgent
 from loguru import logger
 from .base import BaseShopAgent, ShopRequest, ChatMessageRequest
 from repositories.message import MessageRepository
+from repositories.customers import CustomerRepository
+from models.customers import Customer, CustomerModel
 from models.chats import ChatMessageCreate
 import json
 from typing import Dict, Any, Optional, List
@@ -68,6 +70,39 @@ Khi trả lời, bạn cần:
         self.collection_name = "customer_service_embeddings"
         self.agent_name = "CustomerServiceAgent"
 
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a customer service request."""
+        try:
+            message = request.get('message', '')
+            shop_id = request.get('shop_id')
+            chat_history = request.get('chat_history', '')
+            
+            if not shop_id:
+                return {
+                    "message": "Không tìm thấy thông tin shop.",
+                    "type": "error"
+                }
+
+            # Tạo prompt cho LLM
+            prompt = self._build_prompt(message, f"Shop ID: {shop_id}\nChat History:\n{chat_history}")
+            
+            # Tạo response sử dụng assistant
+            response = await self.assistant.a_generate_reply(
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            return {
+                "message": response if response else self._get_fallback_response(),
+                "type": "text"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in CustomerServiceAgent.process: {str(e)}")
+            return {
+                "message": self._get_fallback_response(),
+                "type": "error"
+            }
+
     def _build_prompt(self, query: str, context: str) -> str:
         return (
             f"Người bán hỏi: {query}\n"
@@ -107,41 +142,99 @@ Khi trả lời, bạn cần:
     def _get_fallback_response(self) -> str:
         return "Xin lỗi, tôi không thể tìm thấy thông tin chi tiết về vấn đề này. Vui lòng liên hệ bộ phận hỗ trợ shop để được tư vấn cụ thể hơn."
 
-    async def process(self, request: ShopRequest) -> Dict[str, Any]:
-        # Placeholder implementation. Replace with actual logic as needed.
-        return {
-            "response": {
-                "title": self._get_response_title(request.message),
-                "content": "Customer service processing not yet implemented.",
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "agent": self.name,
-            "context": {
-                "search_results": [],
-                "shop_id": request.shop_id
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-
 class CustomerService:
     def __init__(self, db: Session):
         self.db = db
         self.agent = CustomerServiceAgent()
+        self.customer_repository = CustomerRepository()
 
-    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a customer service request"""
         try:
-            # Convert to ShopRequest format
-            shop_request = ShopRequest(**request)
-            response = await self.agent.process_request(shop_request)
+            shop_id = request.get('shop_id')
+            if not shop_id:
+                return {
+                    "message": "Không tìm thấy thông tin shop.",
+                    "type": "error"
+                }
+
+            # Lấy thông tin khách hàng của shop
+            # TODO: Cần thêm phương thức get_by_shop vào CustomerRepository
+            # Tạm thời lấy tất cả khách hàng
+            customers = []
+            with Session() as session:
+                customers = session.query(Customer).all()
+                # Convert to CustomerModel
+                customers = [CustomerModel.model_validate(customer) for customer in customers]
+
+            if not customers:
+                return {
+                    "message": "Shop chưa có khách hàng nào.",
+                    "type": "text",
+                    "data": {
+                        "total_customers": 0,
+                        "customers": []
+                    }
+                }
+
+            # Format thông tin khách hàng
+            customers_info = []
+            for customer in customers:
+                customer_info = {
+                    "customer_id": customer.customer_id,
+                    "name": f"{customer.customer_fname} {customer.customer_lname}",
+                    "email": customer.customer_mail,
+                    "phone": customer.customer_phone,
+                    "address": customer.customer_address,
+                    "dob": customer.customer_dob.isoformat() if customer.customer_dob else None,
+                    "gender": customer.customer_gender
+                }
+                customers_info.append(customer_info)
+
+            # Tạo response
+            response = {
+                "message": f"Thông tin khách hàng của shop:\n" + "\n".join([
+                    f"- Khách hàng: {customer['name']}\n"
+                    f"  + Email: {customer['email']}\n"
+                    f"  + Số điện thoại: {customer['phone']}\n"
+                    f"  + Địa chỉ: {customer['address']}"
+                    for customer in customers_info
+                ]),
+                "type": "text",
+                "data": {
+                    "total_customers": len(customers_info),
+                    "customers": customers_info
+                }
+            }
+
+            # Thêm thông tin chi tiết nếu có yêu cầu cụ thể
+            message = request.get('message', '').lower()
+            if 'chi tiết' in message or 'detail' in message:
+                response['message'] += "\n\nChi tiết khách hàng:\n" + "\n".join([
+                    f"- Khách hàng: {customer['name']}\n"
+                    f"  + ID: {customer['customer_id']}\n"
+                    f"  + Email: {customer['email']}\n"
+                    f"  + Số điện thoại: {customer['phone']}\n"
+                    f"  + Địa chỉ: {customer['address']}\n"
+                    f"  + Ngày sinh: {customer['dob']}\n"
+                    f"  + Giới tính: {customer['gender']}"
+                    for customer in customers_info
+                ])
+
             return response
+
         except Exception as e:
-            logger.error(f"Error processing request: {str(e)}")
+            logger.error(f"Error processing customer service request: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {
                 "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
                 "type": "error",
                 "error": str(e)
             }
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Alias for process method to maintain backward compatibility"""
+        return await self.process(request)
 
 @router.post("/query")
 async def query_customer_service(request: ChatMessageRequest):
@@ -158,7 +251,7 @@ async def query_customer_service(request: ChatMessageRequest):
             agent_messages=[],
             filters={}
         )
-        response = await customer_service.process_request(shop_request.dict())
+        response = await customer_service.process(shop_request.dict())
         return response
     except Exception as e:
         logger.error(f"Error in query_customer_service: {str(e)}")
@@ -166,6 +259,6 @@ async def query_customer_service(request: ChatMessageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/")
-async def get_customer_service_info():
-    """Get customer service information"""
-    return {"message": "Get customer service info endpoint"} 
+async def list_customers():
+    """List all customers in a shop"""
+    return {"message": "List customers endpoint"} 

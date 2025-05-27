@@ -8,17 +8,27 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import logging
 from sqlalchemy.orm import Session
+import traceback
 
 logger = logging.getLogger(__name__)
 
 # Base configuration for shop agents
 config_list = [
     {
-        "model": "gemini-2.0-flash",
-        "api_key": env.GEMINI_API_KEY,
-        "api_type": "google"
+        "model": "gpt-4o-mini",
+        "api_key": env.OPENAI_API_KEY
     }
 ]
+
+class ShopAgentRequest(BaseModel):
+    shop_id: int 
+    message: str
+    context: str
+
+class ShopAgentResponse(BaseModel):
+    response: str
+    context: Optional[Dict[str, Any]] = None
+
 
 class AgentMessage(BaseModel):
     agent_id: str
@@ -117,49 +127,157 @@ ShopManager = ConversableAgent(
         FinanceAgent: Quản lý tài chính và thanh toán
         PolicyAgent: Hỗ trợ chính sách và quy định
         CustomerServiceAgent: Quản lý tương tác khách hàng
+
+    Kết quả là 1 json duy nhất, không có văn bản mô tả nào khác ngoài json này.
+    {
+        "agent": "ProductManagementAgent" | "InventoryAgent" | "OrderAgent" | "MarketingAgent" | "AnalyticsAgent" | "FinanceAgent" | "PolicyAgent" | "CustomerServiceAgent",
+        "query": String
+    }
     """,
     llm_config={"config_list": config_list},
-    human_input_mode="NEVER"
+    human_input_mode="NEVER",
 )
 
 async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
-    chat = await ShopManager.a_generate_reply(
-        messages=[{"role": "user", "content": request.message}])
-    print(f"Chat: {chat}")
-    
-    # Extract JSON from markdown code block if present
-    content = chat.get("content", "")
-    if content.startswith("```json") and content.endswith("```"):
-        try:
-            # Remove markdown code block markers and parse JSON
-            json_str = content.replace("```json", "").replace("```", "").strip()
-            parsed_response = json.loads(json_str)
-            # Nếu agent là MarketingAgent thì import động và gọi trực tiếp agent này
-            if parsed_response.get("agent") == "MarketingAgent":
-                from shop_chat.marketing import MarketingAgent
-                from sqlalchemy.orm import Session
-                shop_id = request.shop_id
-                db = Session()
-                agent = MarketingAgent(shop_id=shop_id, db=db)
-                return await agent.process(request)
-            return parsed_response
-        except json.JSONDecodeError:
-            pass
-    
-    # Fallback to direct content if not JSON or parsing fails
-    return {
-        "response": {
-            "title": "Câu trả lời từ trợ lý AI",
-            "content": content,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        },
-        "agent": "ShopManager",
-        "context": {
-            "search_results": [],
-            "shop_id": request.shop_id
-        },
-        "timestamp": datetime.now().isoformat()
-    }
+    try:
+        # Get response from ShopManager
+        print(f"✅🙌❎🤷‍♂️🤦‍♀️🤦‍♀️{request.mesage}")
+        chat = await ShopManager.a_generate_reply(
+            messages=[{"role": "user", "content": request.message}]
+        )
+        logger.info(f"Raw ShopManager response: {chat}")
+        logger.info(f"Response type: {type(chat)}")
+        
+        # Handle the response content
+        parsed_content = None
+        
+        if isinstance(chat, dict):
+            logger.info("Response is a dictionary")
+            parsed_content = chat
+        elif isinstance(chat, str):
+            logger.info("Response is a string")
+            try:
+                # First try direct JSON parsing
+                parsed_content = json.loads(chat)
+                logger.info("Successfully parsed JSON from string")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse JSON: {str(e)}")
+                # If that fails, try to extract JSON from markdown code block
+                if chat.startswith("```json") and chat.endswith("```"):
+                    json_str = chat.replace("```json", "").replace("```", "").strip()
+                    try:
+                        parsed_content = json.loads(json_str)
+                        logger.info("Successfully parsed JSON from markdown block")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse JSON from markdown: {str(e)}")
+                        parsed_content = {
+                            "agent": "ProductManagementAgent",
+                            "query": request.message
+                        }
+                else:
+                    parsed_content = {
+                        "agent": "ProductManagementAgent",
+                        "query": request.message
+                    }
+        else:
+            logger.warning(f"Unexpected response type: {type(chat)}")
+            parsed_content = {
+                "agent": "ProductManagementAgent",
+                "query": request.message
+            }
+        
+        logger.info(f"Parsed content: {parsed_content}")
+        
+        # Extract agent and query from the parsed content
+        agent_type = parsed_content.get("agent")
+        query = parsed_content.get("query")
+        
+        if not agent_type or not query:
+            logger.error("Missing agent or query in response")
+            raise ValueError("Missing agent or query in response")
+        
+        # Route to appropriate agent based on agent type
+        if agent_type == "ProductManagementAgent":
+            from shop_chat.product_management import ProductManagement
+            from sqlalchemy.orm import Session
+            from db import SessionLocal
+            
+            # Create a new database session
+            db = SessionLocal()
+            try:
+                agent = ProductManagement(db)
+                result = await agent.process({
+                    "message": query,
+                    "shop_id": request.shop_id,
+                    "chat_history": request.context.get("chat_history", "")
+                })
+                
+                # Ensure the response content is a string
+                response_content = result.get('message', '')
+                if response_content is None:
+                    response_content = "Không có phản hồi từ hệ thống."
+                elif not isinstance(response_content, str):
+                    response_content = str(response_content)
+                
+                # Format the response according to the expected structure
+                return {
+                    "agent": agent_type,
+                    "response": {
+                        "content": response_content,
+                        "type": result.get('type', 'text')
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "chat_id": request.chat_id
+                }
+            finally:
+                db.close()
+            
+        elif agent_type == "MarketingAgent":
+            from shop_chat.marketing import MarketingAgent
+            from sqlalchemy.orm import Session
+            from db import SessionLocal
+            
+            # Create a new database session
+            db = SessionLocal()
+            try:
+                agent = MarketingAgent(shop_id=request.shop_id, db=db)
+                result = await agent.process(request)
+                
+                # Ensure the response content is a string
+                response_content = result.get('message', '')
+                if response_content is None:
+                    response_content = "Không có phản hồi từ hệ thống."
+                elif not isinstance(response_content, str):
+                    response_content = str(response_content)
+                
+                # Format the response according to the expected structure
+                return {
+                    "agent": agent_type,
+                    "response": {
+                        "content": response_content,
+                        "type": result.get('type', 'text')
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "chat_id": request.chat_id
+                }
+            finally:
+                db.close()
+            
+        # Add other agent types here as needed
+        
+    except Exception as e:
+        logger.error(f"Error processing shop chat: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Fallback to direct content if not JSON or parsing fails
+        return {
+            "agent": "ShopManager",
+            "response": {
+                "content": "Xin lỗi, tôi không thể xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error"
+            },
+            "timestamp": datetime.now().isoformat(),
+            "chat_id": request.chat_id
+        }
 
 async def get_shop_info(query):
     chat = await ShopManager.a_generate_reply(

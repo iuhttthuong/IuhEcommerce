@@ -6,10 +6,13 @@ from autogen import ConversableAgent
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from env import env
 from models.chats import ChatMessageCreate
+from models.customers import Customer, CustomerModel
 from repositories.message import MessageRepository
+from repositories.customers import CustomerRepository
 
 router = APIRouter(prefix="/user-profile", tags=["User Profile"])
 
@@ -29,12 +32,16 @@ class UserProfileAction(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Tham số cho hành động")
 
 class UserProfileAgent:
-    def __init__(self):
+    def __init__(self, db: Session):
+        if not db:
+            raise HTTPException(status_code=500, detail="Database connection is required")
+            
         self.llm_config = {
             "model": "gpt-4o-mini",
             "api_key": env.OPENAI_API_KEY
         }
         self.agent = self._create_user_profile_agent()
+        self.db = db
 
     def _create_user_profile_agent(self) -> ConversableAgent:
         system_message = """
@@ -46,17 +53,18 @@ class UserProfileAgent:
         3. Cung cấp thông tin người dùng cho các agent khác khi cần
         4. Xác định thông tin nào nên được thu thập hoặc cập nhật
         
-        Mỗi khi nhận được yêu cầu, bạn cần xác định:
-        1. Thông tin nào người dùng đang chia sẻ
-        2. Thông tin nào cần cập nhật
-        3. Thông tin nào cần truy xuất
+        Khi người dùng yêu cầu thay đổi thông tin, bạn cần:
+        1. Hỏi người dùng muốn thay đổi thông tin nào
+        2. Yêu cầu người dùng cung cấp thông tin mới
+        3. Xác nhận thông tin trước khi cập nhật
         
         Hãy trả về một JSON với cấu trúc:
         {
             "action": "get_profile | update_profile | get_preferences | update_preferences",
             "parameters": {
-                "field_1": "value_1",
-                "field_2": "value_2"
+                "field": "tên trường cần thay đổi",
+                "new_value": "giá trị mới",
+                "needs_confirmation": true
             },
             "explanation": "Mô tả ngắn gọn về hành động"
         }
@@ -78,51 +86,101 @@ class UserProfileAgent:
                 json_str = response[json_start:json_end]
                 return json.loads(json_str)
             else:
-                logger.warning(f"Không tìm thấy JSON trong phản hồi: {response}")
-                return {"action": "error", "parameters": {}, "explanation": "Không thể phân tích phản hồi"}
+                # Nếu không tìm thấy JSON, trả về action mặc định
+                return {
+                    "action": "get_profile",
+                    "parameters": {},
+                    "explanation": "Lấy thông tin hồ sơ người dùng"
+                }
         except json.JSONDecodeError as e:
             logger.error(f"Lỗi giải mã JSON: {e}")
-            return {"action": "error", "parameters": {}, "explanation": f"Lỗi giải mã JSON: {e}"}
+            return {
+                "action": "get_profile",
+                "parameters": {},
+                "explanation": "Lấy thông tin hồ sơ người dùng"
+            }
 
     async def _get_user_profile(self, user_id: int) -> Dict[str, Any]:
-        # TODO: Implement integration with user database
-        # Giả lập dữ liệu user cho mục đích demo
+        if not self.db:
+            raise HTTPException(status_code=500, detail="Database connection not initialized")
+            
+        customer = CustomerRepository.get_by_id(user_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+            
         return {
-            "user_id": user_id,
-            "name": "Nguyễn Văn A",
-            "email": f"user{user_id}@example.com",
-            "phone": "0123456789",
-            "address": "123 Đường ABC, Quận XYZ, TP.HCM",
+            "user_id": customer.customer_id,
+            "name": f"{customer.customer_fname} {customer.customer_lname}",
+            "email": customer.customer_mail,
+            "phone": customer.customer_phone,
+            "address": customer.customer_address,
+            "dob": customer.customer_dob,
+            "gender": customer.customer_gender,
             "preferences": {
-                "categories": ["electronics", "books"],
-                "brands": ["Apple", "Samsung", "Dell"],
-                "price_range": {"min": 100000, "max": 10000000}
-            },
-            "purchase_history": [
-                {"order_id": 1001, "date": "2023-01-15", "total": 1500000},
-                {"order_id": 1002, "date": "2023-02-20", "total": 2300000}
-            ],
-            "wishlist": [101, 203, 305],
-            "loyalty_points": 150,
-            "last_login": "2023-03-10T08:30:00Z"
+                "categories": [],  # To be implemented
+                "brands": [],      # To be implemented
+                "price_range": {"min": 0, "max": 0}  # To be implemented
+            }
         }
 
     async def _update_user_profile(self, user_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
-        # TODO: Implement integration with user database to update profile
-        # Giả lập cập nhật profile
-        profile = await self._get_user_profile(user_id)
+        if not self.db:
+            raise HTTPException(status_code=500, detail="Database connection not initialized")
+            
+        # Lấy thông tin hiện tại của người dùng
+        current_profile = await self._get_user_profile(user_id)
         
-        # Cập nhật các trường cơ bản
-        for key, value in updates.items():
-            if key in profile and key != "user_id":
-                profile[key] = value
+        # Tạo câu lệnh SQL và thực hiện cập nhật
+        try:
+            # Map các trường từ parameters sang tên cột trong database
+            field_mapping = {
+                "name": ("customer_fname", "customer_lname"),
+                "email": "customer_mail",
+                "phone": "customer_phone",
+                "address": "customer_address",
+                "dob": "customer_dob",
+                "gender": "customer_gender"
+            }
+
+            update_data = {}
+            if "field" in updates and "new_value" in updates:
+                field = updates["field"]
+                new_value = updates["new_value"]
                 
-        # Cập nhật preferences nếu có
-        if "preferences" in updates and isinstance(updates["preferences"], dict):
-            for pref_key, pref_value in updates["preferences"].items():
-                profile["preferences"][pref_key] = pref_value
+                if field in field_mapping:
+                    if field == "name":
+                        # Xử lý tên riêng biệt
+                        names = new_value.split()
+                        if len(names) >= 2:
+                            update_data["customer_fname"] = names[0]
+                            update_data["customer_lname"] = " ".join(names[1:])
+                    else:
+                        # Các trường khác
+                        db_field = field_mapping[field]
+                        update_data[db_field] = new_value
+
+            if update_data:
+                # Tạo câu lệnh SQL
+                set_clauses = [f"{k} = :{k}" for k in update_data.keys()]
+                sql = f"""
+                UPDATE customers 
+                SET {', '.join(set_clauses)}
+                WHERE customer_id = :customer_id
+                """
                 
-        return profile
+                # Thực hiện cập nhật
+                with self.db as session:
+                    session.execute(sql, {**update_data, "customer_id": user_id})
+                    session.commit()
+                
+                # Lấy thông tin mới sau khi cập nhật
+                return await self._get_user_profile(user_id)
+            else:
+                raise HTTPException(status_code=400, detail="Không có thông tin nào được cập nhật")
+                
+        except Exception as e:
+            logger.error(f"Lỗi khi cập nhật thông tin người dùng: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Lỗi khi cập nhật thông tin: {str(e)}")
 
     async def _get_user_preferences(self, user_id: int) -> Dict[str, Any]:
         profile = await self._get_user_profile(user_id)
@@ -154,13 +212,46 @@ class UserProfileAgent:
 
     def _generate_response(self, action_result: Dict[str, Any], action: str) -> str:
         if action == "get_profile":
-            return f"Thông tin hồ sơ của bạn: Tên: {action_result.get('name')}, Email: {action_result.get('email')}, SĐT: {action_result.get('phone')}"
+            if not action_result:
+                return "Không tìm thấy thông tin hồ sơ của bạn. Vui lòng kiểm tra lại thông tin đăng nhập."
+                
+            profile_info = (
+                f"Thông tin hồ sơ của bạn:\n"
+                f"- Họ và tên: {action_result.get('name', 'Chưa cập nhật')}\n"
+                f"- Email: {action_result.get('email', 'Chưa cập nhật')}\n"
+                f"- Số điện thoại: {action_result.get('phone', 'Chưa cập nhật')}\n"
+                f"- Địa chỉ: {action_result.get('address', 'Chưa cập nhật')}\n"
+                f"- Ngày sinh: {action_result.get('dob', 'Chưa cập nhật')}\n"
+                f"- Giới tính: {action_result.get('gender', 'Chưa cập nhật')}\n\n"
+                f"Bạn có muốn cập nhật thông tin nào không? Nếu có, vui lòng cho tôi biết thông tin cần cập nhật."
+            )
+            return profile_info
         elif action == "update_profile":
+            if "field" in action_result and "new_value" in action_result:
+                field = action_result["field"]
+                new_value = action_result["new_value"]
+                old_value = action_result.get("old_value", "Chưa cập nhật")
+                
+                confirmation = (
+                    f"Bạn có muốn thay đổi thông tin sau không?\n"
+                    f"- Trường thông tin: {field}\n"
+                    f"- Giá trị cũ: {old_value}\n"
+                    f"- Giá trị mới: {new_value}\n\n"
+                    f"Vui lòng xác nhận bằng cách trả lời 'đồng ý' hoặc 'không đồng ý'"
+                )
+                return confirmation
             return "Hồ sơ của bạn đã được cập nhật thành công."
         elif action == "get_preferences":
-            categories = ", ".join(action_result.get("categories", []))
-            brands = ", ".join(action_result.get("brands", []))
-            return f"Sở thích của bạn: Danh mục: {categories}, Thương hiệu: {brands}"
+            preferences = action_result.get("preferences", {})
+            categories = ", ".join(preferences.get("categories", []))
+            brands = ", ".join(preferences.get("brands", []))
+            price_range = preferences.get("price_range", {})
+            return (
+                f"Sở thích của bạn:\n"
+                f"- Danh mục: {categories}\n"
+                f"- Thương hiệu: {brands}\n"
+                f"- Khoảng giá: {price_range.get('min', 0)} - {price_range.get('max', 0)} VNĐ"
+            )
         elif action == "update_preferences":
             return "Sở thích của bạn đã được cập nhật thành công."
         else:
@@ -170,7 +261,6 @@ class UserProfileAgent:
         try:
             # Đảm bảo có user_id
             if not request.user_id:
-                # Giả sử chat_id là user_id trong trường hợp này
                 user_id = request.chat_id
             else:
                 user_id = request.user_id
@@ -179,6 +269,9 @@ class UserProfileAgent:
             prompt = f"""
             Hãy phân tích yêu cầu sau từ người dùng liên quan đến thông tin hồ sơ:
             "{request.message}"
+            
+            Nếu người dùng yêu cầu xem thông tin cá nhân, hãy trả về action "get_profile".
+            Nếu người dùng muốn cập nhật thông tin, hãy trả về action "update_profile" với các thông tin cần cập nhật.
             
             Các thực thể đã được xác định:
             {request.entities if request.entities else 'Không có thông tin thực thể.'}
@@ -192,42 +285,85 @@ class UserProfileAgent:
             action = action_info.get("action", "get_profile")
             parameters = action_info.get("parameters", {})
             
-            # Thực hiện hành động
-            action_result = await self._execute_action(action, parameters, user_id)
-            
-            # Tạo nội dung phản hồi
-            response_content = self._generate_response(action_result, action)
-            
-            # Lưu thông tin tương tác vào message repository
-            message_repository = MessageRepository()
-            response_payload = ChatMessageCreate(
-                chat_id=request.chat_id,
-                role="assistant",
-                content=response_content,
-                metadata={"action": action, "result": "success"}
-            )
-            message_repository.create(response_payload)
-            
-            return UserProfileResponse(
-                content=response_content,
-                user_data=action_result,
-                success=True
-            )
+            try:
+                # Thực hiện hành động
+                action_result = await self._execute_action(action, parameters, user_id)
+                
+                # Tạo nội dung phản hồi
+                response_content = self._generate_response(action_result, action)
+                
+                # Lưu thông tin tương tác
+                response_payload = ChatMessageCreate(
+                    chat_id=request.chat_id,
+                    role="assistant",
+                    content=response_content,
+                    metadata={"action": action, "result": "success"},
+                    sender_type="assistant",
+                    sender_id=user_id
+                )
+                MessageRepository.create_message(response_payload)
+                
+                return UserProfileResponse(
+                    content=response_content,
+                    user_data=action_result,
+                    success=True
+                )
+            except HTTPException as he:
+                error_content = f"Không thể truy cập thông tin hồ sơ: {he.detail}"
+                response_payload = ChatMessageCreate(
+                    chat_id=request.chat_id,
+                    role="assistant",
+                    content=error_content,
+                    metadata={"action": action, "result": "error"},
+                    sender_type="assistant",
+                    sender_id=user_id
+                )
+                MessageRepository.create_message(response_payload)
+                return UserProfileResponse(
+                    content=error_content,
+                    user_data={},
+                    success=False
+                )
             
         except Exception as e:
             logger.error(f"Lỗi trong user_profile_agent: {e}")
+            error_content = "Đã xảy ra lỗi khi xử lý thông tin hồ sơ của bạn."
+            try:
+                response_payload = ChatMessageCreate(
+                    chat_id=request.chat_id,
+                    role="assistant",
+                    content=error_content,
+                    metadata={"action": "error", "result": "error"},
+                    sender_type="assistant",
+                    sender_id=request.user_id or request.chat_id
+                )
+                MessageRepository.create_message(response_payload)
+            except:
+                pass
             return UserProfileResponse(
-                content="Đã xảy ra lỗi khi xử lý thông tin hồ sơ của bạn.",
+                content=error_content,
                 user_data={},
                 success=False
             )
             
 @router.post("/process", response_model=UserProfileResponse)
 async def process_request(request: UserProfileRequest):
+    db = None
     try:
-        agent = UserProfileAgent()
+        # Initialize database session
+        from database import SessionLocal
+        db = SessionLocal()
+        
+        # Khởi tạo agent với database session
+        agent = UserProfileAgent(db)
+        
+        # Xử lý request
         response = await agent.process_request(request)
         return response
     except Exception as e:
         logger.error(f"Lỗi trong process_request endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Đã xảy ra lỗi khi xử lý yêu cầu.") 
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Đảm bảo đóng database session
+        if db:
+            db.close() 

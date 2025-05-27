@@ -9,10 +9,15 @@ from models.chats import (
     ChatResponse,
     ChatMessageResponse
 )
+import asyncio
+from models.shops import Shop
 from shop_chat.base import ShopRequest, ChatMessageRequest, process_shop_chat
+from shop_chat.shop_manager import ShopManager
 from repositories.message import MessageRepository
 from datetime import datetime
 import logging
+import traceback
+
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +36,8 @@ async def create_session(
     return service.create_session(ChatCreate(shop_id=shop_id))
 
 @router.post("/sessions/{session_id}/messages")
-async def process_message(
-    session_id: int,
-    message: str,
-    shop_id: int,
-    db: Session = Depends(get_db)
-):
-    """Process a new message in a chat session"""
+async def process_message(session_id: int, message: str, shop_id: int, db: Session = Depends(get_db)):
+    shop_manager = ShopManager(db=db, shop_id=shop_id)
     service = ChatService(db)
     try:
         # Add message to chat
@@ -47,10 +47,10 @@ async def process_message(
             sender_id=shop_id,
             content=message
         ))
-        
+
         # Get chat history
-        messages = service.get_messages(session_id)
-        
+        # messages = service.get_messages(session_id)
+
         # Process with shop chat
         shop_request = ShopRequest(
             message=message,
@@ -62,32 +62,41 @@ async def process_message(
             agent_messages=[],
             filters={}
         )
-        
+
         # Process using shop chat
         response = await process_shop_chat(shop_request)
-        
-        # Save the response to chat history
-        service.add_message(ChatMessageCreate(
-            chat_id=session_id,
-            sender_type="shop",
-            sender_id=shop_id,
-            content=response["response"]["content"] if isinstance(response, dict) and "response" in response else str(response)
-        ))
-        
-        # Save the message to database
-        message_repository = MessageRepository()
-        message = ChatMessageCreate(
-            chat_id=session_id,
-            sender_type="shop",
-            sender_id=shop_id,
-            content=message,
-            message_metadata=response.get("context", {}) if isinstance(response, dict) else {}
+        logger.info(f"Response from shop chat: {response}")
+        logger.info(f"Response type: {type(response)}")
+        print(f"✅🤦‍♀️➡️❎💣😊🙌😁Response: {response}")
+        answer = shop_manager.process_chat_message(message, response, shop_id, session_id)
+        if asyncio.iscoroutine(answer):
+            answer = await answer
+        logger.info(f"Answer from shop manager: {answer}")
+
+        # Ensure the message content is a string
+        message_content = answer.get("message")
+        if message_content is None:
+            message_content = "Không có phản hồi từ hệ thống."
+        elif not isinstance(message_content, str):
+            message_content = str(message_content)
+
+        service.add_message(
+            ChatMessageCreate(
+                chat_id=session_id,
+                sender_type="agent_response",
+                sender_id=shop_id,
+                content=message_content,
+                message_metadata=response.get("context", {} if isinstance(response, dict) else {})
+            )
         )
-        message_repository.create_message(message)
-        
-        return response
+
+        return message_content
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in process_message: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sessions/{session_id}/history", response_model=List[ChatMessageResponse])
 async def get_chat_history(
@@ -138,10 +147,10 @@ async def create_chat_message(request: ChatMessageRequest, db: Session = Depends
             agent_messages=[],
             filters={}
         )
-        
+
         # Process the request
         response = await process_shop_chat(shop_request)
-        
+
         # Save the message to database
         message_repository = MessageRepository()
         message = ChatMessageCreate(
@@ -152,8 +161,23 @@ async def create_chat_message(request: ChatMessageRequest, db: Session = Depends
             message_metadata=request.message_metadata
         )
         message_repository.create_message(message)
-        
+
         return response
     except Exception as e:
         logger.error(f"Error in create_chat_message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e)) 
+
+
+@router.post("/check/{shop_id}")
+async def check_shop(shop_id: int, db: Session = Depends(get_db)):
+    """
+    Check shop status or information.
+    """
+    # Giả sử bạn có MessageRepository hoặc ShopRepository, ví dụ:
+    # shop = ShopRepository(db).get_shop_by_id(shop_id)
+    # Nếu không có, bạn có thể truy vấn trực tiếp bằng SQLAlchemy
+
+    # Ví dụ truy vấn trực tiếp:
+    shop = db.query(Shop).filter(Shop.shop_id == shop_id).first()
+
+    return  shop is not None

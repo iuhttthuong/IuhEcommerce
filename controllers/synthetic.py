@@ -93,32 +93,14 @@ Nếu không có thông tin nào nổi bật ngoài câu hỏi chính, Info có 
 
 """
 
-function_schema = {
-    "name": "create_pronmpt",
-    "description": "Create a prompt based on chat history",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "chat_history": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "role": {
-                            "type": "string",
-                            "enum": ["user", "assistant"]
-                        },
-                        "content": {
-                            "type": "string"
-                        }
-                    },
-                    "required": ["role", "content"]
-                }
-            }
-        },
-        "required": ["chat_history"]
-    }
-}
+final_check_prompt = """
+
+
+
+
+
+
+"""
 
 # Agent tạo prompt từ lịch sử hội thoại và câu hỏi của khách hàng
 prompt_agent = AssistantAgent(
@@ -143,7 +125,7 @@ async def chatbot_reply(message, chat_id = 0, api_url: str = "http://localhost:8
         ]
     )
     print("❎❎❎✅✅✅➡️➡️💣💣💣🤣🤣Reply from agent:", reply)
-    
+
     # Extract the reply content from the response
     if isinstance(reply, dict):
         if 'content' in reply:
@@ -156,11 +138,15 @@ async def chatbot_reply(message, chat_id = 0, api_url: str = "http://localhost:8
 
 
 output_messgae = """
-Bạn là một trợ lý AI của sàn thương mại điện tử IUH Ecommerce.
-Bạn sẽ nhận được đầu vào là câu trả lời khách hàng cho câu hỏi của khách hàng
-nhiệm vụ của bạn là parsing lại câu trả lời cho đẹp hơn
-Hãy dùng latex để định dạng câu trả lời, Mỗi khi cần xuống dòng hãy dùng \n, mỗi khi cần tab dùng \t, tuyệt đối không dùng latext khác
-"""
+Bạn là trợ lý AI của sàn thương mại điện tử IUH Ecommerce.
+Bạn sẽ nhận đầu vào là câu trả lời của khách hàng cho các câu hỏi từ khách hàng.
+
+Nhiệm vụ của bạn:
+
+Phân tích (parsing) lại câu trả lời đó để trình bày đẹp hơn, chuyên nghiệp hơn.
+
+Sử dụng ** in đậm ** và các ký tự xuống dòng (\n), tab (\t) để định dạng lại câu trả lời, giúp nó dễ đọc và rõ ràng hơn."""
+
 
 OutputAgent  = AssistantAgent(
     name="OutputAgent",
@@ -169,19 +155,29 @@ OutputAgent  = AssistantAgent(
     llm_config={"config_list": config_list}
 )
 
+
 @router.post("/chatbot/output")
-async def chatbot_output(message ):
+async def chatbot_output(message, query):
+    """
+    Tạo phản hồi cho người dùng dựa trên hội thoại trước đó (message) và
+    câu hỏi hiện tại (query).
 
-    reply = OutputAgent.generate_reply(
-        messages=[
-            {"role": "user", "content": message}
-        ]
-    )
-    print("❎❎❎✅✅✅➡️➡️💣💣💣🤣🤣Reply from agent:", reply)
+    - message: Tin nhắn trước đó của agent (string).
+    - query: Tin nhắn mới nhất của khách hàng (string).
+    """
+    # Chuẩn bị context hội thoại cho agent, theo đúng thứ tự hội thoại
+    messages = [
+        {"role": "assistant", "content": message},
+        {"role": "user", "content": query},
+    ]
+
+    # Sinh phản hồi từ agent
+    reply = OutputAgent.generate_reply(messages=messages)
+
+    # Log ra màn hình
+    print("💀🕸️👻 Reply from agent:", reply)
+
     return reply
-
-
-
 
 
 # async def main():

@@ -3,10 +3,14 @@ from autogen import AssistantAgent
 from loguru import logger
 from .base import BaseShopAgent, ShopRequest, ChatMessageRequest
 from repositories.analytics import AnalyticsRepository
+from repositories.message import MessageRepository
+from models.chats import ChatMessageCreate
 from datetime import datetime, timedelta
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
+from services.search import SearchServices
+import traceback
 
 router = APIRouter(prefix="/shop/analytics", tags=["Shop Analytics"])
 
@@ -15,345 +19,135 @@ class AnalyticsAgent(BaseShopAgent):
         super().__init__(
             shop_id=shop_id,
             name="AnalyticsAgent",
-            system_message="""Bạn là một trợ lý AI chuyên nghiệp làm việc cho sàn thương mại điện tử IUH-Ecommerce, chuyên phân tích và báo cáo dữ liệu cho người bán.
+            system_message="""Bạn là một trợ lý AI chuyên nghiệp làm việc cho sàn thương mại điện tử IUH-Ecommerce, chuyên tư vấn và hướng dẫn cho người bán về phân tích dữ liệu và báo cáo.
 
 Nhiệm vụ của bạn:
-1. Phân tích doanh số và doanh thu
-2. Phân tích sản phẩm và tồn kho
-3. Phân tích khách hàng và tương tác
-4. Phân tích marketing và khuyến mãi
-5. Tổng hợp báo cáo tổng quan
+1. Phân tích dữ liệu bán hàng
+2. Tạo báo cáo thống kê
+3. Đề xuất cải thiện
+4. Dự đoán xu hướng
+
+Các chức năng chính:
+1. Báo cáo doanh số:
+   - Thống kê doanh thu
+   - Phân tích sản phẩm
+   - Theo dõi hiệu quả
+   - Đánh giá tăng trưởng
+   - Dự báo xu hướng
+
+2. Thống kê bán hàng:
+   - Số lượng đơn hàng
+   - Giá trị đơn hàng
+   - Tỷ lệ chuyển đổi
+   - Phân tích khách hàng
+   - Đánh giá hiệu quả
+
+3. Phân tích hiệu quả:
+   - Hiệu suất sản phẩm
+   - Tỷ lệ lợi nhuận
+   - Chi phí vận hành
+   - ROI marketing
+   - Tối ưu chi phí
+
+4. Báo cáo tồn kho:
+   - Mức tồn kho
+   - Tỷ lệ quay vòng
+   - Dự báo nhu cầu
+   - Tối ưu tồn kho
+   - Cảnh báo hết hàng
+
+5. Báo cáo khách hàng:
+   - Phân tích hành vi
+   - Đánh giá trải nghiệm
+   - Tỷ lệ quay lại
+   - Giá trị khách hàng
+   - Phân khúc khách hàng
 
 Khi trả lời, bạn cần:
-- Cung cấp dữ liệu chính xác và đầy đủ
-- Phân tích xu hướng và mẫu hình
-- Đề xuất cải thiện và tối ưu
+- Tập trung vào dữ liệu thực tế
+- Cung cấp phân tích chi tiết
+- Đề xuất giải pháp tối ưu
 - Sử dụng ngôn ngữ chuyên nghiệp
-- Trình bày dữ liệu dễ hiểu"""
+- Cung cấp ví dụ cụ thể
+- Nhấn mạnh các điểm quan trọng
+- Hướng dẫn từng bước khi cần"""
         )
         self.analytics_repository = AnalyticsRepository(Session())
+        self.message_repository = MessageRepository()
         self.collection_name = "analytics_embeddings"
         self.agent_name = "AnalyticsAgent"
+
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process an analytics request."""
+        try:
+            message = request.get('message', '')
+            shop_id = request.get('shop_id')
+            chat_history = request.get('chat_history', '')
+            
+            if not shop_id:
+                return {
+                    "message": "Không tìm thấy thông tin shop.",
+                    "type": "error"
+                }
+
+            # Tạo prompt cho LLM
+            prompt = self._build_prompt(message, f"Shop ID: {shop_id}\nChat History:\n{chat_history}")
+            
+            # Tạo response sử dụng assistant
+            response = await self.assistant.a_generate_reply(
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            return {
+                "message": response if response else self._get_fallback_response(),
+                "type": "text"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in AnalyticsAgent.process: {str(e)}")
+            return {
+                "message": self._get_fallback_response(),
+                "type": "error"
+            }
 
     def _build_prompt(self, query: str, context: str) -> str:
         return (
             f"Người bán hỏi: {query}\n"
-            f"Thông tin phân tích liên quan:\n{context}\n"
+            f"Thông tin phân tích dữ liệu liên quan:\n{context}\n"
             "Hãy trả lời theo cấu trúc sau:\n"
-            "1. Tóm tắt dữ liệu:\n"
-            "   - Thời gian phân tích\n"
+            "1. Tóm tắt yêu cầu:\n"
+            "   - Mục đích phân tích\n"
             "   - Phạm vi dữ liệu\n"
-            "   - Các chỉ số chính\n\n"
+            "   - Thời gian phân tích\n\n"
             "2. Phân tích chi tiết:\n"
+            "   - Các chỉ số quan trọng\n"
             "   - Xu hướng và mẫu hình\n"
-            "   - So sánh với kỳ trước\n"
-            "   - Điểm mạnh và điểm yếu\n\n"
-            "3. Đề xuất cải thiện:\n"
-            "   - Các cơ hội tăng trưởng\n"
+            "   - So sánh và đánh giá\n\n"
+            "3. Kết quả và hiểu biết:\n"
+            "   - Kết quả chính\n"
+            "   - Hiểu biết sâu sắc\n"
+            "   - Điểm cần lưu ý\n\n"
+            "4. Đề xuất và khuyến nghị:\n"
             "   - Giải pháp tối ưu\n"
+            "   - Cải thiện hiệu quả\n"
             "   - Kế hoạch hành động\n\n"
+            "5. Theo dõi và đánh giá:\n"
+            "   - Chỉ số theo dõi\n"
+            "   - Thời gian đánh giá\n"
+            "   - Mục tiêu cần đạt\n\n"
             "Trả lời cần:\n"
-            "- Chính xác và đầy đủ\n"
-            "- Dễ hiểu và trực quan\n"
-            "- Có tính thực tế cao\n"
-            "- Đề xuất cụ thể"
+            "- Dựa trên dữ liệu thực tế\n"
+            "- Phân tích chi tiết và logic\n"
+            "- Đề xuất giải pháp khả thi\n"
+            "- Sử dụng ngôn ngữ chuyên nghiệp\n"
+            "- Cung cấp ví dụ cụ thể"
         )
 
     def _get_response_title(self, query: str) -> str:
-        return f"Phân tích {query.split()[0] if query else 'tổng quan'}"
+        return f"Phân tích dữ liệu - {query.split()[0] if query else 'Hỗ trợ'}"
 
     def _get_fallback_response(self) -> str:
-        return "Xin lỗi, tôi không thể tìm thấy dữ liệu phân tích cho yêu cầu này. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ shop."
-
-    async def process(self, request: ShopRequest) -> Dict[str, Any]:
-        # Placeholder implementation. Replace with actual logic as needed.
-        return {
-            "response": {
-                "title": self._get_response_title(request.message),
-                "content": "Analytics processing not yet implemented.",
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "agent": self.name,
-            "context": {
-                "search_results": [],
-                "shop_id": request.shop_id
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-
-    async def process_request(self, request: ShopRequest) -> Dict[str, Any]:
-        try:
-            message = request.message.lower()
-            
-            if "doanh số" in message or "doanh thu" in message:
-                return await self._handle_sales_analytics(request)
-            elif "sản phẩm" in message:
-                return await self._handle_product_analytics(request)
-            elif "khách hàng" in message:
-                return await self._handle_customer_analytics(request)
-            elif "marketing" in message or "khuyến mãi" in message:
-                return await self._handle_marketing_analytics(request)
-            elif "tổng quan" in message or "tổng hợp" in message:
-                return await self._handle_overview_analytics(request)
-            else:
-                return {
-                    "response": {
-                        "title": "Phân tích dữ liệu",
-                        "content": "Tôi có thể giúp bạn phân tích dữ liệu. Bạn có thể:\n- Xem phân tích doanh số\n- Xem phân tích sản phẩm\n- Xem phân tích khách hàng\n- Xem phân tích marketing\n- Xem báo cáo tổng quan\nBạn muốn xem phân tích nào?",
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    },
-                    "agent": self.agent_name,
-                    "context": {},
-                    "timestamp": datetime.now().isoformat()
-                }
-        except Exception as e:
-            logger.error(f"Error in process_request: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return {
-                "response": {
-                    "title": "Lỗi xử lý yêu cầu",
-                    "content": "Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "agent": self.agent_name,
-                "context": {},
-                "timestamp": datetime.now().isoformat()
-            }
-
-    async def _handle_sales_analytics(self, request: ShopRequest) -> Dict[str, Any]:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        
-        summary = self.analytics_repository.get_analytics_summary(
-            request.shop_id,
-            start_date,
-            end_date
-        )
-        
-        if not summary or "sales" not in summary:
-            return {
-                "response": {
-                    "title": "Phân tích doanh số",
-                    "content": "Không có dữ liệu doanh số trong khoảng thời gian này.",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "agent": self.agent_name,
-                "context": {},
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        sales = summary["sales"]
-        response_content = "Phân tích doanh số:\n"
-        response_content += f"Tổng doanh thu: {sales['total_sales']:,.0f} VNĐ\n"
-        response_content += f"Tổng số đơn hàng: {sales['total_orders']}\n"
-        response_content += f"Giá trị đơn hàng trung bình: {sales['average_order_value']:,.0f} VNĐ\n"
-        response_content += f"Tỷ lệ chuyển đổi: {sales['conversion_rate']:.1%}\n"
-        response_content += f"Tỷ lệ hoàn trả: {sales['refund_rate']:.1%}"
-        
-        return {
-            "response": {
-                "title": "Phân tích doanh số",
-                "content": response_content,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "agent": self.agent_name,
-            "context": {"summary": summary},
-            "timestamp": datetime.now().isoformat()
-        }
-
-    async def _handle_product_analytics(self, request: ShopRequest) -> Dict[str, Any]:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        
-        summary = self.analytics_repository.get_analytics_summary(
-            request.shop_id,
-            start_date,
-            end_date
-        )
-        
-        if not summary or "products" not in summary:
-            return {
-                "response": {
-                    "title": "Phân tích sản phẩm",
-                    "content": "Không có dữ liệu sản phẩm trong khoảng thời gian này.",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "agent": self.agent_name,
-                "context": {},
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        products = summary["products"]
-        response_content = "Phân tích sản phẩm:\n"
-        response_content += f"Tổng số sản phẩm: {products['total_products']}\n"
-        response_content += f"Sản phẩm đang bán: {products['active_products']}\n"
-        
-        if products['top_selling_products']:
-            response_content += "\nSản phẩm bán chạy:\n"
-            for product_id, quantity in list(products['top_selling_products'].items())[:5]:
-                response_content += f"- Sản phẩm {product_id}: {quantity} đơn vị\n"
-        
-        if products['low_stock_products']:
-            response_content += "\nSản phẩm sắp hết hàng:\n"
-            for product_id, stock in list(products['low_stock_products'].items())[:5]:
-                response_content += f"- Sản phẩm {product_id}: còn {stock} đơn vị\n"
-        
-        return {
-            "response": {
-                "title": "Phân tích sản phẩm",
-                "content": response_content,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "agent": self.agent_name,
-            "context": {"summary": summary},
-            "timestamp": datetime.now().isoformat()
-        }
-
-    async def _handle_customer_analytics(self, request: ShopRequest) -> Dict[str, Any]:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        
-        summary = self.analytics_repository.get_analytics_summary(
-            request.shop_id,
-            start_date,
-            end_date
-        )
-        
-        if not summary or "customers" not in summary:
-            return {
-                "response": {
-                    "title": "Phân tích khách hàng",
-                    "content": "Không có dữ liệu khách hàng trong khoảng thời gian này.",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "agent": self.agent_name,
-                "context": {},
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        customers = summary["customers"]
-        response_content = "Phân tích khách hàng:\n"
-        response_content += f"Tổng số khách hàng: {customers['total_customers']}\n"
-        response_content += f"Khách hàng mới: {customers['new_customers']}\n"
-        response_content += f"Khách hàng quay lại: {customers['returning_customers']}\n"
-        response_content += f"Đánh giá trung bình: {customers['customer_satisfaction']:.1f}/5.0"
-        
-        return {
-            "response": {
-                "title": "Phân tích khách hàng",
-                "content": response_content,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "agent": self.agent_name,
-            "context": {"summary": summary},
-            "timestamp": datetime.now().isoformat()
-        }
-
-    async def _handle_marketing_analytics(self, request: ShopRequest) -> Dict[str, Any]:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        
-        summary = self.analytics_repository.get_analytics_summary(
-            request.shop_id,
-            start_date,
-            end_date
-        )
-        
-        if not summary or "marketing" not in summary:
-            return {
-                "response": {
-                    "title": "Phân tích marketing",
-                    "content": "Không có dữ liệu marketing trong khoảng thời gian này.",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "agent": self.agent_name,
-                "context": {},
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        marketing = summary["marketing"]
-        response_content = "Phân tích marketing:\n"
-        response_content += f"Tổng số khuyến mãi: {marketing['total_promotions']}\n"
-        response_content += f"Khuyến mãi đang chạy: {marketing['active_promotions']}\n"
-        response_content += f"Chi phí marketing: {marketing['marketing_costs']:,.0f} VNĐ\n"
-        response_content += f"ROI marketing: {marketing['marketing_roi']:.1%}"
-        
-        if marketing['promotion_effectiveness']:
-            response_content += "\n\nHiệu quả khuyến mãi:\n"
-            for promo_id, rate in list(marketing['promotion_effectiveness'].items())[:5]:
-                response_content += f"- Khuyến mãi {promo_id}: {rate:.1%}\n"
-        
-        return {
-            "response": {
-                "title": "Phân tích marketing",
-                "content": response_content,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "agent": self.agent_name,
-            "context": {"summary": summary},
-            "timestamp": datetime.now().isoformat()
-        }
-
-    async def _handle_overview_analytics(self, request: ShopRequest) -> Dict[str, Any]:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=30)
-        
-        summary = self.analytics_repository.get_analytics_summary(
-            request.shop_id,
-            start_date,
-            end_date
-        )
-        
-        if not summary:
-            return {
-                "response": {
-                    "title": "Báo cáo tổng quan",
-                    "content": "Không có dữ liệu tổng quan trong khoảng thời gian này.",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                },
-                "agent": self.agent_name,
-                "context": {},
-                "timestamp": datetime.now().isoformat()
-            }
-        
-        response_content = "Báo cáo tổng quan:\n\n"
-        
-        if "sales" in summary:
-            sales = summary["sales"]
-            response_content += "Doanh số:\n"
-            response_content += f"- Tổng doanh thu: {sales['total_sales']:,.0f} VNĐ\n"
-            response_content += f"- Tổng đơn hàng: {sales['total_orders']}\n"
-            response_content += f"- Giá trị đơn trung bình: {sales['average_order_value']:,.0f} VNĐ\n\n"
-        
-        if "products" in summary:
-            products = summary["products"]
-            response_content += "Sản phẩm:\n"
-            response_content += f"- Tổng số sản phẩm: {products['total_products']}\n"
-            response_content += f"- Sản phẩm đang bán: {products['active_products']}\n\n"
-        
-        if "customers" in summary:
-            customers = summary["customers"]
-            response_content += "Khách hàng:\n"
-            response_content += f"- Tổng số khách hàng: {customers['total_customers']}\n"
-            response_content += f"- Khách hàng mới: {customers['new_customers']}\n"
-            response_content += f"- Khách hàng quay lại: {customers['returning_customers']}\n\n"
-        
-        if "marketing" in summary:
-            marketing = summary["marketing"]
-            response_content += "Marketing:\n"
-            response_content += f"- Khuyến mãi đang chạy: {marketing['active_promotions']}\n"
-            response_content += f"- ROI marketing: {marketing['marketing_roi']:.1%}"
-        
-        return {
-            "response": {
-                "title": "Báo cáo tổng quan",
-                "content": response_content,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            },
-            "agent": self.agent_name,
-            "context": {"summary": summary},
-            "timestamp": datetime.now().isoformat()
-        }
+        return "Xin lỗi, tôi không thể tìm thấy thông tin chi tiết về vấn đề này. Vui lòng liên hệ bộ phận hỗ trợ shop để được tư vấn cụ thể hơn."
 
 class Analytics:
     def __init__(self, db: Session):
@@ -361,29 +155,117 @@ class Analytics:
         self.agent = AnalyticsAgent()
         self.analytics_repository = AnalyticsRepository(db)
 
-    async def get_analytics(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Get analytics data"""
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process an analytics request"""
         try:
-            shop_request = ShopRequest(**request)
-            response = await self.agent.process_request(shop_request)
-            return response
-        except Exception as e:
-            logger.error(f"Error processing request: {str(e)}")
-            return {
-                "response": {
-                    "title": "Lỗi xử lý yêu cầu",
-                    "content": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            shop_id = request.get('shop_id')
+            if not shop_id:
+                return {
+                    "message": "Không tìm thấy thông tin shop.",
+                    "type": "error"
+                }
+
+            # Lấy thông tin phân tích của shop
+            analytics_data = await self.analytics_repository.get_by_shop(shop_id)
+            if not analytics_data:
+                return {
+                    "message": "Shop chưa có dữ liệu phân tích nào.",
+                    "type": "text",
+                    "data": {
+                        "total_revenue": 0,
+                        "total_orders": 0,
+                        "total_customers": 0,
+                        "metrics": {}
+                    }
+                }
+
+            # Format thông tin phân tích
+            metrics = {
+                "revenue": {
+                    "daily": analytics_data.get('daily_revenue', 0),
+                    "weekly": analytics_data.get('weekly_revenue', 0),
+                    "monthly": analytics_data.get('monthly_revenue', 0),
+                    "total": analytics_data.get('total_revenue', 0)
                 },
-                "agent": "AnalyticsAgent",
-                "context": {},
-                "timestamp": datetime.now().isoformat()
+                "orders": {
+                    "daily": analytics_data.get('daily_orders', 0),
+                    "weekly": analytics_data.get('weekly_orders', 0),
+                    "monthly": analytics_data.get('monthly_orders', 0),
+                    "total": analytics_data.get('total_orders', 0)
+                },
+                "customers": {
+                    "new": analytics_data.get('new_customers', 0),
+                    "returning": analytics_data.get('returning_customers', 0),
+                    "total": analytics_data.get('total_customers', 0)
+                },
+                "products": {
+                    "top_selling": analytics_data.get('top_selling_products', []),
+                    "low_stock": analytics_data.get('low_stock_products', []),
+                    "total": analytics_data.get('total_products', 0)
+                }
             }
+
+            # Tạo response
+            response = {
+                "message": f"Thông tin phân tích của shop:\n\n"
+                          f"1. Doanh thu:\n"
+                          f"   - Hôm nay: {metrics['revenue']['daily']:,}đ\n"
+                          f"   - Tuần này: {metrics['revenue']['weekly']:,}đ\n"
+                          f"   - Tháng này: {metrics['revenue']['monthly']:,}đ\n"
+                          f"   - Tổng cộng: {metrics['revenue']['total']:,}đ\n\n"
+                          f"2. Đơn hàng:\n"
+                          f"   - Hôm nay: {metrics['orders']['daily']}\n"
+                          f"   - Tuần này: {metrics['orders']['weekly']}\n"
+                          f"   - Tháng này: {metrics['orders']['monthly']}\n"
+                          f"   - Tổng cộng: {metrics['orders']['total']}\n\n"
+                          f"3. Khách hàng:\n"
+                          f"   - Khách mới: {metrics['customers']['new']}\n"
+                          f"   - Khách quay lại: {metrics['customers']['returning']}\n"
+                          f"   - Tổng số: {metrics['customers']['total']}",
+                "type": "text",
+                "data": {
+                    "total_revenue": metrics['revenue']['total'],
+                    "total_orders": metrics['orders']['total'],
+                    "total_customers": metrics['customers']['total'],
+                    "metrics": metrics
+                }
+            }
+
+            # Thêm thông tin chi tiết nếu có yêu cầu cụ thể
+            message = request.get('message', '').lower()
+            if 'chi tiết' in message or 'detail' in message:
+                response['message'] += f"\n\n4. Sản phẩm:\n"
+                if metrics['products']['top_selling']:
+                    response['message'] += f"   - Sản phẩm bán chạy:\n" + "\n".join([
+                        f"     + {product['name']}: {product['quantity']} đơn vị"
+                        for product in metrics['products']['top_selling'][:5]
+                    ])
+                if metrics['products']['low_stock']:
+                    response['message'] += f"\n   - Sản phẩm sắp hết hàng:\n" + "\n".join([
+                        f"     + {product['name']}: {product['current_stock']} đơn vị"
+                        for product in metrics['products']['low_stock'][:5]
+                    ])
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error processing analytics request: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {
+                "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "type": "error",
+                "error": str(e)
+            }
+
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Alias for process method to maintain backward compatibility"""
+        return await self.process(request)
 
 @router.post("/query")
 async def query_analytics(request: ChatMessageRequest):
     try:
         analytics = Analytics(Session())
+        # Convert to ShopRequest format
         shop_request = ShopRequest(
             message=request.content,
             chat_id=request.chat_id,
@@ -394,7 +276,7 @@ async def query_analytics(request: ChatMessageRequest):
             agent_messages=[],
             filters={}
         )
-        response = await analytics.get_analytics(shop_request.dict())
+        response = await analytics.process(shop_request.dict())
         return response
     except Exception as e:
         logger.error(f"Error in query_analytics: {str(e)}")
@@ -402,6 +284,6 @@ async def query_analytics(request: ChatMessageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/")
-async def get_shop_analytics():
-    """Get shop analytics"""
-    return {"message": "Get shop analytics endpoint"} 
+async def list_analytics():
+    """List all analytics data for a shop"""
+    return {"message": "List analytics endpoint"} 

@@ -72,7 +72,7 @@ class ShopChatService:
             raise ValueError("Chat session not found")
 
         messages = self.repository.get_session_messages(session_id)
-        
+
         return ShopChatHistoryResponse(
             session=ShopChatSessionModel.from_orm(session),
             messages=[ShopChatMessageModel.from_orm(msg) for msg in messages]
@@ -86,3 +86,8 @@ class ShopChatService:
     async def delete_session(self, session_id: int) -> bool:
         """Delete a chat session"""
         return self.repository.delete_session(session_id) 
+
+
+    async def check_shop_by_shop_id(shop_id: int) -> Optional[Shop]:
+        """Kiểm tra shop theo shop_id bằng cách gọi lại hàm cùng tên trong repo."""
+        return repository.check_shop_by_shop_id(shop_id)

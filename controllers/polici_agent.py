@@ -60,11 +60,13 @@ def get_fqa(payload: str, collection_name: str = "faq_embeddings", limit: int = 
 # Cấu hình Assistant Agent
 assistant = AssistantAgent(
     name="Assistant",
-    system_message="""Bạn là một trợ lý AI thông minh làm việc cho một sàn thương mại điện tử IUH-Ecomerce.
+    system_message="""
+    Bạn là một trợ lý AI thông minh làm việc cho một sàn thương mại điện tử IUH-Ecomerce.
     Bạn sẽ nhận đầu vào câu hỏi của người dùng về các chính sách của sàn thương mại điện tử IUH-Ecomerce.
     Nhiệm vụ của bạn là tìm kiếm thông tin trong cơ sở dữ liệu và trả lời câu hỏi của người dùng một cách chính xác và đầy đủ nhất có thể.
     Hãy trả lời một cách thân thiện, tự nhiên và chuyên nghiệp. Sử dụng ngôn ngữ dễ hiểu và thân thiện với người dùng.
-    Khi tìm kiếm thông tin, luôn sử dụng collection 'faq_embeddings'.""",
+    Khi tìm kiếm thông tin, luôn sử dụng collection 'faq_embeddings'.
+    """,
     llm_config={"config_list": config_list},
     max_consecutive_auto_reply=2
 )
@@ -93,7 +95,7 @@ def ask_chatbot(request: ChatbotRequest):
             sender_id=0,
             content=message
         )
-        message_repository.create_message(message_payload)
+        # message_repository.create_message(message_payload)
 
         # Tìm kiếm nhiều thông tin liên quan từ Qdrant
         search_results = SearchServices.search(message, collection_name="faq_embeddings", limit=5)
@@ -128,7 +130,7 @@ def ask_chatbot(request: ChatbotRequest):
             sender_id=0,
             content=response_content
         )
-        message_repository.create_message(response_payload)
+        # message_repository.create_message(response_payload)
 
         return {"response": response_content}
 

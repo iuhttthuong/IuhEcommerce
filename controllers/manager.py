@@ -99,13 +99,12 @@ async def get_product_info(query):
     return response
 
 
-
 ### call agent
-async def call_agent(agent, request: ChatbotRequest):
+async def call_agent(agent, request: ChatbotRequest, raw_message: Optional[str] = None):
     try:
         agent_id = str(uuid.uuid4())
         agent_type = agent
-        
+
         # Create agent message
         agent_message = AgentMessage(
             agent_id=agent_id,
@@ -113,7 +112,7 @@ async def call_agent(agent, request: ChatbotRequest):
             content=request.message,
             metadata={"context": request.context, "entities": request.entities}
         )
-        
+
         # Process with specific agent
         if agent == "ProductAgent":
             result = await product_agent(request)
@@ -129,7 +128,7 @@ async def call_agent(agent, request: ChatbotRequest):
             logger.info(f"Calling policy_ask_chatbot with request: {request}")
             result = policy_ask_chatbot(request)
             logger.info(f"Policy agent result: {result}")
-            
+
             # Nếu result là dict kiểu {'response': ...}, lấy giá trị response
             if isinstance(result, dict) and "response" in result:
                 answer = result["response"]
@@ -137,7 +136,7 @@ async def call_agent(agent, request: ChatbotRequest):
             else:
                 answer = str(result)
                 logger.info(f"Using string result as answer: {answer}")
-                
+
             result = {
                 "message": answer,
                 "type": "policy",
@@ -161,20 +160,25 @@ async def call_agent(agent, request: ChatbotRequest):
             orchestrator = OrchestratorAgent()
             result = await orchestrator.process_request(request)
         elif agent == "UserProfileAgent":
-            user_profile = UserProfileAgent()
-            user_request = UserProfileRequest(
-                chat_id=request.chat_id,
-                user_id=request.user_id,
-                message=request.message,
-                entities=request.entities or {}
-            )
-            result = await user_profile.process_request(user_request)
-            result = {
-                "message": result.content,
-                "type": "user_profile",
-                "user_data": result.user_data,
-                "success": result.success
-            }
+            from db import SessionLocal
+            db = SessionLocal()
+            try:
+                user_profile = UserProfileAgent(db)
+                user_request = UserProfileRequest(
+                    chat_id=request.chat_id,
+                    user_id=request.user_id,
+                    message=request.message,
+                    entities=request.entities or {}
+                )
+                result = await user_profile.process_request(user_request)
+                result = {
+                    "message": result.content,
+                    "type": "user_profile",
+                    "user_data": result.user_data,
+                    "success": result.success
+                }
+            finally:
+                db.close()
         elif agent == "SearchDiscoveryAgent":
             search_agent = SearchDiscoveryAgent()
             result = await search_agent.process_search(request)
@@ -251,7 +255,7 @@ async def call_agent(agent, request: ChatbotRequest):
             }
         }
 
-        final_agent_response = await chatbot_output(agent_response.content )
+        final_agent_response = await chatbot_output(agent_response.content, raw_message)
         print(f"🤣💕🤣➡️🤷‍♂️❎{final_agent_response}")
         response_payload = ChatMessageCreate(
             chat_id=request.chat_id,
@@ -261,12 +265,12 @@ async def call_agent(agent, request: ChatbotRequest):
             message_metadata=response_metadata
         )
         MessageRepository.create_message(response_payload)
-
+        print("Đã lưu phản hồi của agent vào cơ sở dữ liệu.")
         return {
             "agent_id": agent_response.agent_id,
             "agent_type": agent_response.agent_type,
-            "content": agent_response.content,
-            "metadata": agent_response.metadata
+            "content": final_agent_response,
+            "metadata": agent_response.metadata,
         }
 
     except Exception as e:
@@ -281,6 +285,7 @@ async def call_agent(agent, request: ChatbotRequest):
 @router.post("/ask")
 async def ask_chatbot(request: ChatbotRequest):
     try:
+        raw_message = request.message
         message = request.message
         print(f"Message: {message}")
 
@@ -292,7 +297,7 @@ async def ask_chatbot(request: ChatbotRequest):
         db = Session()
         try:
             chat_service = ChatService(db)
-            
+
             if request.chat_id == 0 or request.chat_id is None:
                 # Tạo chat mới với các giá trị mặc định
                 new_chat = ChatCreate(
@@ -330,16 +335,15 @@ async def ask_chatbot(request: ChatbotRequest):
             # Gửi tin nhắn đến chatbot để lấy prompt
             message = await chatbot_reply(message, chat_id = request.chat_id , api_url = api_url)
 
-            
             # Process message and get agent response
             response = await get_product_info(message)
             agent = response.get("agent")
             query = response.get("query")
-
+            request.message = query  # Update request message with the query
             if agent and query:
-                result = await call_agent(agent, request)
-                return result
-                
+                result = await call_agent(agent, request, raw_message)
+                return await chatbot_output(result, raw_message)
+
             else:
                 return {
                     "message": "Xin lỗi, tôi không thể xử lý yêu cầu của bạn lúc này.",
@@ -362,14 +366,15 @@ async def ask_chatbot(request: ChatbotRequest):
 @router.post("/chat", response_model=AgentResponse)
 async def chat_with_manager(payload: ChatbotRequest):
     try:
+        raw_message = payload.message
         # Process message and get agent response
         response = await get_product_info(payload.message)
         agent = response.get("agent")
         query = response.get("query")
 
         if agent and query:
-            result = await call_agent(agent, payload)
-            return result
+            result = await call_agent(agent, payload, raw_message)
+            return await chatbot_output(result, raw_message)
 
         return AgentResponse(
             agent_id="manager",
@@ -384,4 +389,3 @@ async def chat_with_manager(payload: ChatbotRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-

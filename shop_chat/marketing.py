@@ -1,164 +1,265 @@
 from fastapi import APIRouter, HTTPException
+from autogen import AssistantAgent
 from loguru import logger
 from .base import BaseShopAgent, ShopRequest, ChatMessageRequest
 from repositories.message import MessageRepository
-from repositories.products import ProductRepositories
-from services.shops import ShopServices
-from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional
-import traceback
+from repositories.marketing import MarketingRepository
+from models.coupons import Coupon, CouponCreate, CouponUpdate
+from models.chats import ChatMessageCreate
 import json
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+from sqlalchemy.orm import Session
+from services.search import SearchServices
+import traceback
 
 router = APIRouter(prefix="/shop/marketing", tags=["Shop Marketing"])
 
-# System message tối ưu cho GPT-4o-mini
-OPTIMAL_SYSTEM_MESSAGE = '''
-Bạn là chuyên gia marketing AI cho sàn thương mại điện tử IUH-Ecommerce, chuyên tư vấn và giải đáp cho từng shop dựa trên dữ liệu thực tế của shop đó.
-
-YÊU CẦU:
-- Luôn ưu tiên phân tích, sử dụng dữ liệu sản phẩm, đánh giá, doanh số, phản hồi khách hàng... của shop để trả lời.
-- Trả lời phải cá nhân hóa, tập trung vào shop, không trả lời chung chung hoặc lý thuyết suông.
-- Phân tích điểm mạnh/yếu từng sản phẩm, đề xuất chiến lược marketing, khuyến mãi, quảng cáo, chăm sóc khách hàng phù hợp với shop.
-- Nếu shop hỏi về xu hướng, chính sách, thị trường... hãy chủ động tìm kiếm thông tin mới nhất trên web, nhưng vẫn phải liên hệ, so sánh, hoặc gợi ý áp dụng thực tế cho shop dựa trên dữ liệu shop cung cấp.
-- Luôn trả lời chi tiết, đúng trọng tâm câu hỏi, có ví dụ minh họa, hướng dẫn từng bước nếu cần.
-- Nếu dữ liệu shop chưa đủ, hãy hỏi lại để lấy thêm thông tin cần thiết.
-
-CẤU TRÚC TRẢ LỜI (nên tham khảo, không bắt buộc cứng nhắc):
-1. Tóm tắt vấn đề & mục tiêu shop
-2. Phân tích dữ liệu thực tế của shop (sản phẩm, đánh giá, doanh số...)
-3. Đề xuất chiến lược/giải pháp phù hợp, có ví dụ minh họa
-4. Hướng dẫn từng bước triển khai (nếu cần)
-5. Khuyến nghị cải thiện & lưu ý quan trọng
-
-Tuyệt đối không trả lời chung chung, không bỏ qua dữ liệu shop. Nếu phải dùng thông tin ngoài, hãy luôn liên hệ thực tế shop và giải thích rõ ràng.
-'''
-
 class MarketingAgent(BaseShopAgent):
-    def __init__(self, shop_id: int = None, db: Session = None):
+    def __init__(self, shop_id: int = None):
         super().__init__(
             shop_id=shop_id,
             name="MarketingAgent",
-            system_message=OPTIMAL_SYSTEM_MESSAGE
+            system_message="""Bạn là một trợ lý AI chuyên nghiệp làm việc cho sàn thương mại điện tử IUH-Ecommerce, chuyên tư vấn và hướng dẫn cho người bán về marketing.
+
+Nhiệm vụ của bạn:
+1. Tư vấn chiến lược marketing
+2. Hướng dẫn tạo chiến dịch
+3. Tư vấn tối ưu quảng cáo
+4. Đề xuất cải thiện hiệu quả
+
+Các chức năng chính:
+1. Chiến lược marketing:
+   - Phân tích thị trường
+   - Xác định mục tiêu
+   - Lập kế hoạch
+   - Đo lường hiệu quả
+   - Điều chỉnh chiến lược
+
+2. Tạo chiến dịch:
+   - Thiết kế chiến dịch
+   - Lập ngân sách
+   - Chọn kênh quảng cáo
+   - Tạo nội dung
+   - Theo dõi kết quả
+
+3. Tối ưu quảng cáo:
+   - Phân tích hiệu quả
+   - Điều chỉnh ngân sách
+   - Tối ưu nội dung
+   - Cải thiện targeting
+   - Tăng ROI
+
+4. Cải thiện hiệu quả:
+   - Phân tích dữ liệu
+   - Đề xuất cải thiện
+   - Tối ưu chi phí
+   - Tăng chuyển đổi
+   - Nâng cao hiệu quả
+
+Khi trả lời, bạn cần:
+- Tập trung vào lợi ích của người bán
+- Cung cấp hướng dẫn chi tiết
+- Đề xuất giải pháp tối ưu
+- Sử dụng ngôn ngữ chuyên nghiệp
+- Cung cấp ví dụ cụ thể
+- Nhấn mạnh các điểm quan trọng
+- Hướng dẫn từng bước khi cần"""
         )
-        self.db = db
-        self.product_repo = ProductRepositories(db)
-        self.shop_info = ShopServices.get(shop_id)
         self.message_repository = MessageRepository()
+        self.collection_name = "marketing_embeddings"
         self.agent_name = "MarketingAgent"
 
-    async def process(self, request: ShopRequest) -> Dict[str, Any]:
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a marketing request."""
         try:
-            products = self.product_repo.get_by_shop(self.shop_id, limit=10)
-            shop_info = self.shop_info
-
-            # Nếu không có sản phẩm
-            if not products:
-                response_content = (
-                    "Shop của bạn hiện chưa có sản phẩm nào hoặc chưa có dữ liệu đánh giá. "
-                    "Vui lòng cập nhật sản phẩm và khuyến khích khách hàng đánh giá để nhận được tư vấn chiến lược marketing cá nhân hóa, hiệu quả nhất cho shop của bạn."
-                )
-                return self._create_response(response_content, {"products": []})
-
-            # Chuẩn bị dữ liệu sản phẩm thực tế (tối đa 10 sản phẩm, truyền dạng JSON rõ ràng)
-            product_data = [
-                {
-                    "product_id": p.product_id,
-                    "name": p.name,
-                    "price": p.price,
-                    "quantity_sold": p.quantity_sold,
-                    "rating_average": p.rating_average,
-                    "review_count": p.review_count,
-                    "review_text": p.review_text,
-                    "short_description": p.short_description,
+            message = request.get('message', '')
+            shop_id = request.get('shop_id')
+            chat_history = request.get('chat_history', '')
+            
+            if not shop_id:
+                return {
+                    "message": "Không tìm thấy thông tin shop.",
+                    "type": "error"
                 }
-                for p in products
-            ]
 
-            # Nếu câu hỏi có từ khóa cần search web (ví dụ: xu hướng, chính sách, đối thủ, thị trường...)
-            web_results = None
-            keywords = ["xu hướng", "trend", "chính sách", "luật", "đối thủ", "thị trường", "benchmark", "mới nhất", "news"]
-            if any(kw in request.message.lower() for kw in keywords):
-                from functions import web_search
-                try:
-                    web_results = web_search(
-                        search_term=request.message,
-                        explanation="Tìm kiếm thông tin mới nhất trên web để bổ sung vào tư vấn marketing cho shop."
-                    )
-                except Exception as e:
-                    logger.warning(f"Web search failed: {e}")
-                    web_results = None
-
-            # Tạo prompt động cho LLM, nhấn mạnh PHẢI sử dụng dữ liệu sản phẩm
-            prompt = (
-                f"Shop: {getattr(shop_info, 'shop_name', None)} (ID: {self.shop_id})\n"
-                "Dưới đây là dữ liệu thực tế về sản phẩm của shop (bạn PHẢI sử dụng dữ liệu này để phân tích và trả lời, không được trả lời chung chung):\n"
-                f"{json.dumps(product_data, ensure_ascii=False, indent=2)}\n"
-                f"Câu hỏi của shop: {request.message}\n"
+            # Tạo prompt cho LLM
+            prompt = self._build_prompt(message, f"Shop ID: {shop_id}\nChat History:\n{chat_history}")
+            
+            # Tạo response sử dụng assistant
+            response = await self.assistant.a_generate_reply(
+                messages=[{"role": "user", "content": prompt}]
             )
-            if web_results and hasattr(web_results, 'results'):
-                prompt += f"\nKết quả tìm kiếm web liên quan: {web_results.results}\n"
-            elif web_results:
-                prompt += f"\nKết quả tìm kiếm web liên quan: {web_results}\n"
-            prompt += (
-                "---\n"
-                "YÊU CẦU: Phải phân tích, nhận xét, đề xuất dựa trên dữ liệu sản phẩm thực tế của shop. "
-                "Nếu shop hỏi về marketing, hãy phân tích điểm mạnh/yếu từng sản phẩm, đề xuất chiến lược phù hợp. "
-                "Nếu shop hỏi về vấn đề khác, hãy trả lời đúng trọng tâm, sử dụng dữ liệu sản phẩm nếu liên quan. "
-                "Nếu có thông tin ngoài, hãy liên hệ thực tế shop và giải thích rõ ràng."
-            )
-
-            # Gọi LLM thực tế (hoặc placeholder)
-            # response_content = call_gpt4o_mini(self.system_message, prompt)
-            response_content = "[GPT-4o-mini trả lời ở đây dựa trên dữ liệu thực tế, câu hỏi và kết quả web nếu có]"  # Placeholder
-
-            return self._create_response(response_content, {"products": product_data, "web_results": web_results})
+            
+            return {
+                "message": response if response else self._get_fallback_response(),
+                "type": "text"
+            }
+            
         except Exception as e:
             logger.error(f"Error in MarketingAgent.process: {str(e)}")
-            return self._get_error_response()
+            return {
+                "message": self._get_fallback_response(),
+                "type": "error"
+            }
+
+    def _build_prompt(self, query: str, context: str) -> str:
+        return (
+            f"Người bán hỏi: {query}\n"
+            f"Thông tin marketing liên quan:\n{context}\n"
+            "Hãy trả lời theo cấu trúc sau:\n"
+            "1. Tóm tắt vấn đề:\n"
+            "   - Mục đích và phạm vi\n"
+            "   - Đối tượng áp dụng\n"
+            "   - Tầm quan trọng\n\n"
+            "2. Hướng dẫn chi tiết:\n"
+            "   - Các bước thực hiện\n"
+            "   - Yêu cầu cần thiết\n"
+            "   - Lưu ý quan trọng\n\n"
+            "3. Quy trình xử lý:\n"
+            "   - Các bước thực hiện\n"
+            "   - Thời gian xử lý\n"
+            "   - Tài liệu cần thiết\n\n"
+            "4. Tối ưu và cải thiện:\n"
+            "   - Cách tối ưu\n"
+            "   - Cải thiện hiệu quả\n"
+            "   - Tăng trải nghiệm\n\n"
+            "5. Khuyến nghị:\n"
+            "   - Giải pháp tối ưu\n"
+            "   - Cải thiện quy trình\n"
+            "   - Tăng hiệu quả\n\n"
+            "Trả lời cần:\n"
+            "- Chuyên nghiệp và dễ hiểu\n"
+            "- Tập trung vào lợi ích của người bán\n"
+            "- Cung cấp hướng dẫn chi tiết\n"
+            "- Đề xuất giải pháp tối ưu\n"
+            "- Cung cấp ví dụ cụ thể"
+        )
 
     def _get_response_title(self, query: str) -> str:
-        return f"Marketing - Phân tích & Chiến lược cho Shop {self.shop_id}"
+        return f"Marketing - {query.split()[0] if query else 'Hỗ trợ'}"
 
     def _get_fallback_response(self) -> str:
-        return "Xin lỗi, tôi cần thêm dữ liệu sản phẩm hoặc thông tin shop để tư vấn chiến lược marketing tối ưu."
+        return "Xin lỗi, tôi không thể tìm thấy thông tin chi tiết về vấn đề này. Vui lòng liên hệ bộ phận hỗ trợ shop để được tư vấn cụ thể hơn."
 
 class Marketing:
-    def __init__(self, db: Session, shop_id: int):
+    def __init__(self, db: Session, shop_id: int = None):
         self.db = db
-        self.agent = MarketingAgent(shop_id, db)
+        self.shop_id = shop_id
+        self.agent = MarketingAgent(shop_id)
+        self.marketing_repository = MarketingRepository(db)
 
-    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a marketing request"""
         try:
-            shop_request = ShopRequest(**request)
-            response = await self.agent.process(shop_request)
+            shop_id = request.get('shop_id') or self.shop_id
+            if not shop_id:
+                return {
+                    "message": "Không tìm thấy thông tin shop.",
+                    "type": "error"
+                }
+
+            # Lấy thông tin chiến dịch marketing của shop
+            campaigns = self.marketing_repository.get_by_shop(shop_id)
+            if not campaigns:
+                return {
+                    "message": "Shop chưa có chiến dịch marketing nào.",
+                    "type": "text",
+                    "data": {
+                        "total_campaigns": 0,
+                        "campaigns": []
+                    }
+                }
+
+            # Format thông tin chiến dịch
+            campaigns_info = []
+            for campaign in campaigns:
+                campaign_info = {
+                    "campaign_id": campaign.coupon_id,
+                    "name": campaign.code,
+                    "description": campaign.description,
+                    "start_date": campaign.start_date.isoformat() if campaign.start_date else None,
+                    "end_date": campaign.end_date.isoformat() if campaign.end_date else None,
+                    "discount_type": campaign.discount_type,
+                    "discount_value": campaign.discount_value,
+                    "min_order_value": campaign.min_order_value,
+                    "max_discount": campaign.max_discount,
+                    "usage_limit": campaign.usage_limit,
+                    "usage_count": campaign.usage_count,
+                    "status": "active" if campaign.is_active else "inactive"
+                }
+                campaigns_info.append(campaign_info)
+
+            # Tạo response
+            response = {
+                "message": f"Thông tin chiến dịch marketing của shop:\n" + "\n".join([
+                    f"- Chiến dịch: {campaign['name']}\n"
+                    f"  + Loại giảm giá: {campaign['discount_type']}\n"
+                    f"  + Giá trị giảm: {campaign['discount_value']}%\n"
+                    f"  + Đơn hàng tối thiểu: {campaign['min_order_value']:,}đ\n"
+                    f"  + Giảm tối đa: {campaign['max_discount']:,}đ\n"
+                    f"  + Ngày bắt đầu: {campaign['start_date']}\n"
+                    f"  + Ngày kết thúc: {campaign['end_date']}\n"
+                    f"  + Trạng thái: {campaign['status']}"
+                    for campaign in campaigns_info
+                ]),
+                "type": "text",
+                "data": {
+                    "total_campaigns": len(campaigns_info),
+                    "campaigns": campaigns_info
+                }
+            }
+
+            # Thêm thông tin chi tiết nếu có yêu cầu cụ thể
+            message = request.get('message', '').lower()
+            if 'chi tiết' in message or 'detail' in message:
+                response['message'] += "\n\nChi tiết chiến dịch:\n" + "\n".join([
+                    f"- Chiến dịch: {campaign['name']}\n"
+                    f"  + ID: {campaign['campaign_id']}\n"
+                    f"  + Mô tả: {campaign['description']}\n"
+                    f"  + Loại giảm giá: {campaign['discount_type']}\n"
+                    f"  + Giá trị giảm: {campaign['discount_value']}%\n"
+                    f"  + Đơn hàng tối thiểu: {campaign['min_order_value']:,}đ\n"
+                    f"  + Giảm tối đa: {campaign['max_discount']:,}đ\n"
+                    f"  + Ngày bắt đầu: {campaign['start_date']}\n"
+                    f"  + Ngày kết thúc: {campaign['end_date']}\n"
+                    f"  + Giới hạn sử dụng: {campaign['usage_limit']}\n"
+                    f"  + Đã sử dụng: {campaign['usage_count']}\n"
+                    f"  + Trạng thái: {campaign['status']}"
+                    for campaign in campaigns_info
+                ])
+
             return response
+
         except Exception as e:
-            logger.error(f"Error processing request: {str(e)}")
+            logger.error(f"Error processing marketing request: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {
                 "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
                 "type": "error",
                 "error": str(e)
             }
 
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Alias for process method to maintain backward compatibility"""
+        return await self.process(request)
+
 @router.post("/query")
 async def query_marketing(request: ChatMessageRequest):
     try:
-        db = Session()
-        shop_id = request.sender_id if request.sender_type == "shop" else None
-        if not shop_id:
-            raise HTTPException(status_code=400, detail="Thiếu shop_id để phân tích chiến lược marketing cá nhân hóa.")
-        marketing = Marketing(db, shop_id)
+        marketing = Marketing(Session())
+        # Convert to ShopRequest format
         shop_request = ShopRequest(
             message=request.content,
             chat_id=request.chat_id,
-            shop_id=shop_id,
-            user_id=None,
+            shop_id=request.sender_id if request.sender_type == "shop" else None,
+            user_id=request.sender_id if request.sender_type == "user" else None,
             context=request.message_metadata if request.message_metadata else {},
             entities={},
             agent_messages=[],
             filters={}
         )
-        response = await marketing.process_request(shop_request.dict())
+        response = await marketing.process(shop_request.dict())
         return response
     except Exception as e:
         logger.error(f"Error in query_marketing: {str(e)}")
@@ -166,5 +267,6 @@ async def query_marketing(request: ChatMessageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/")
-async def get_marketing_campaigns():
-    return {"message": "Get marketing campaigns endpoint"} 
+async def list_campaigns():
+    """List all marketing campaigns in a shop"""
+    return {"message": "List campaigns endpoint"} 

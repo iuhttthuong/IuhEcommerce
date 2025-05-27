@@ -19,6 +19,8 @@ from typing import Optional, Dict, Any, List
 from .base import BaseShopAgent, ShopRequest, ChatMessageRequest
 from datetime import datetime
 from loguru import logger
+import requests
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +28,7 @@ logger = logging.getLogger(__name__)
 config_list = [
     {
         "model": "gpt-4o-mini",
-        "api_key": env.OPENAI_API_KEY,
-        "api_type": "openai"
+        "api_key": env.OPENAI_API_KEY
     }
 ]
 
@@ -60,7 +61,7 @@ YÊU CẦU:
 - Không trả lời chung chung, không lý thuyết suông.
 
 CẤU TRÚC TRẢ LỜI (nên tham khảo):
-1. Tóm tắt chính sách liên quan
+1. Chi tiết chính sách liên quan
 2. Điều kiện & quy định
 3. Quy trình thực hiện
 4. Lưu ý quan trọng
@@ -115,9 +116,8 @@ class PolicyAgent(BaseShopAgent):
 
             web_results = None
             if need_web:
-                from functions import web_search
                 try:
-                    web_results = web_search(
+                    web_results = await web_search(
                         search_term=f"{query} site:gov.vn OR site:moit.gov.vn OR site:luatvietnam.vn OR site:baochinhphu.vn",
                         explanation="Tìm kiếm thông tin chính sách mới nhất, chuyên sâu từ các nguồn uy tín để bổ sung cho câu trả lời."
                     )
@@ -221,4 +221,40 @@ def get_fqa(payload: str, collection_name: str = "faq_embeddings", limit: int = 
 @router.get("/faq")
 def get_policy_faq(query: str, limit: int = 1):
     answer = search_faq(query, limit)
-    return {"answer": answer} 
+    return {"answer": answer}
+
+async def web_search(search_term: str, explanation: str = None) -> Dict[str, Any]:
+    """Search the web for information"""
+    try:
+        # Thực hiện tìm kiếm web
+        search_url = f"https://www.google.com/search?q={search_term}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(search_url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Lấy kết quả tìm kiếm
+        search_results = []
+        for result in soup.find_all('div', class_='g')[:5]:  # Lấy 5 kết quả đầu tiên
+            title = result.find('h3')
+            link = result.find('a')
+            snippet = result.find('div', class_='VwiC3b')
+            
+            if title and link and snippet:
+                search_results.append({
+                    'title': title.text,
+                    'link': link['href'],
+                    'snippet': snippet.text
+                })
+        
+        return {
+            'results': search_results,
+            'explanation': explanation
+        }
+    except Exception as e:
+        logger.error(f"Error in web_search: {str(e)}")
+        return {
+            'results': [],
+            'error': str(e)
+        } 

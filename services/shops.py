@@ -6,6 +6,7 @@ from db import Session as DBSession
 from passlib.context import CryptContext
 import bcrypt
 
+
 # Create password context with bcrypt to match pgcrypto's format
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -200,3 +201,4 @@ class ShopServices:
             return db_shop
         finally:
             db.close() 
+

@@ -15,9 +15,8 @@ router = APIRouter(prefix="/shop/chat", tags=["Shop Chat"])
 # Configuration for shop chat agents
 config_list = [
     {
-        "model": "gemini-2.0-flash",
-        "api_key": env.GEMINI_API_KEY,
-        "api_type": "google"
+        "model": "gpt-4o-mini",
+        "api_key": env.OPENAI_API_KEY
     }
 ]
 

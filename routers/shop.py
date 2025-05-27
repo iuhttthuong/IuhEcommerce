@@ -39,7 +39,8 @@ async def chat_with_shop(
     try:
         result = await shop_manager.process_chat_message(
             chat_message.message,
-            chat_message.context or {}
+            chat_message.context or {},
+            1
         )
         # Extract the assistant message if present, else fallback to a string
         assistant_message = result.get("message") if isinstance(result, dict) and "message" in result else str(result)
