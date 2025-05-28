@@ -23,6 +23,7 @@ class Customer(Base):
     service_tickets: Mapped[List["CustomerService"]] = relationship("CustomerService", back_populates="customer", foreign_keys="CustomerService.customer_id")
     assigned_tickets: Mapped[List["CustomerService"]] = relationship("CustomerService", back_populates="assignee", foreign_keys="CustomerService.assigned_to")
     reviews: Mapped[List["Review"]] = relationship("Review", back_populates="customer")
+    orders: Mapped[List["Order"]] = relationship("Order", back_populates="customer", lazy="select")
 
 class CustomerCreate(BaseModel):
     customer_fname: str

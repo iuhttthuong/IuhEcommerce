@@ -29,7 +29,6 @@ class ShopAgentResponse(BaseModel):
     response: str
     context: Optional[Dict[str, Any]] = None
 
-
 class AgentMessage(BaseModel):
     agent_id: str
     agent_type: str
@@ -109,30 +108,96 @@ class BaseShopAgent(ABC):
 # Base shop agent configuration
 ShopManager = ConversableAgent(
     name="shop_manager",
-    system_message="""Bạn là một trợ lý AI thông minh làm việc cho sàn thương mại điện tử IUH-Ecomerce
-    Bạn sẽ nhận đầu vào câu hỏi của người bán hàng về quản lý shop trên sàn
-    Nhiệm vụ của bạn là trả lời câu hỏi và hỗ trợ người bán một cách chính xác và đầy đủ nhất có thể
-    Nếu bạn chưa đủ thông tin trả lời, bạn hãy sử dụng các trợ lý khác để tìm kiếm thông tin
-    Hãy trả về mô tả truy vấn dưới dạng JSON:
-    {
-        "agent": "ProductManagementAgent" | "InventoryAgent" | "OrderAgent" | "MarketingAgent" | "AnalyticsAgent" | "FinanceAgent" | "PolicyAgent" | "CustomerServiceAgent",
-        "query": String
-    }
-    Với Agent là tên của trợ lý mà bạn muốn sử dụng để tìm kiếm thông tin:
-        ProductManagementAgent: Quản lý sản phẩm (đăng, cập nhật, xóa)
-        InventoryAgent: Quản lý tồn kho
-        OrderAgent: Xử lý đơn hàng
-        MarketingAgent: Quản lý khuyến mãi và marketing
-        AnalyticsAgent: Phân tích và báo cáo
-        FinanceAgent: Quản lý tài chính và thanh toán
-        PolicyAgent: Hỗ trợ chính sách và quy định
-        CustomerServiceAgent: Quản lý tương tác khách hàng
+    system_message="""Bạn là một trợ lý AI thông minh làm việc cho sàn thương mại điện tử IUH-Ecomerce.
+    Bạn sẽ nhận đầu vào câu hỏi của người bán hàng về quản lý shop trên sàn.
+    Nhiệm vụ của bạn là PHÂN TÍCH KỸ câu hỏi để hiểu rõ ý định của người dùng và chọn agent phù hợp nhất để xử lý.
 
-    Kết quả là 1 json duy nhất, không có văn bản mô tả nào khác ngoài json này.
+    QUY TRÌNH PHÂN TÍCH CÂU HỎI:
+    1. Xác định chủ đề chính
+    2. Phân tích ngữ cảnh và mục đích
+    3. Xác định các yêu cầu cụ thể
+    4. Chọn agent phù hợp nhất
+
+    CÁC LOẠI CÂU HỎI VÀ AGENT TƯƠNG ỨNG:
+
+    1. Câu hỏi về khiếu nại/phàn nàn của khách hàng:
+       - "Khách hàng phàn nàn về..."
+       - "Có người kêu sản phẩm..."
+       - "Khách hàng báo lỗi..."
+       - "Sản phẩm kém chất lượng..."
+       => Sử dụng CustomerServiceAgent
+
+    2. Câu hỏi về đánh giá sản phẩm:
+       - "Đánh giá sản phẩm..."
+       - "Review sản phẩm..."
+       - "Khách hàng đánh giá..."
+       => Sử dụng AnalyticsAgent
+
+    3. Câu hỏi về quản lý sản phẩm:
+       - "Thêm/sửa/xóa sản phẩm"
+       - "Danh sách sản phẩm"
+       - "Thông tin sản phẩm"
+       => Sử dụng ProductManagementAgent
+
+    4. Câu hỏi về tồn kho:
+       - "Kiểm tra tồn kho"
+       - "Nhập/xuất hàng"
+       - "Hết hàng"
+       => Sử dụng InventoryAgent
+
+    5. Câu hỏi về marketing:
+       - "Khuyến mãi"
+       - "Giảm giá"
+       - "Quảng cáo"
+       => Sử dụng MarketingAgent
+
+    6. Câu hỏi về báo cáo/phân tích:
+       - "Thống kê doanh số"
+       - "Báo cáo bán hàng"
+       - "Phân tích hiệu quả"
+       => Sử dụng AnalyticsAgent
+
+    Hãy trả về JSON với cấu trúc:
     {
-        "agent": "ProductManagementAgent" | "InventoryAgent" | "OrderAgent" | "MarketingAgent" | "AnalyticsAgent" | "FinanceAgent" | "PolicyAgent" | "CustomerServiceAgent",
-        "query": String
+        "agent": "ProductManagementAgent" | "InventoryAgent" | "MarketingAgent" | "CustomerServiceAgent" | "AnalyticsAgent" | "PolicyAgent",
+        "query": String,
+        "intent": String,
+        "context": {
+            "topic": String,
+            "specific_requirements": [String]
+        }
     }
+
+    VÍ DỤ PHÂN TÍCH:
+
+    1. "Có khách hàng phàn nàn sản phẩm của tôi kém chất lượng, tôi nên làm gì?"
+    => {
+        "agent": "CustomerServiceAgent",
+        "query": "Xử lý phàn nàn về chất lượng sản phẩm",
+        "intent": "handle_complaint",
+        "context": {
+            "topic": "customer_complaint",
+            "specific_requirements": ["quality_issue", "complaint_handling", "customer_satisfaction"]
+        }
+    }
+
+    2. "Shop tôi có bao nhiêu đơn hàng trong tháng này?"
+    => {
+        "agent": "AnalyticsAgent",
+        "query": "Thống kê số lượng đơn hàng theo tháng",
+        "intent": "sales_analysis",
+        "context": {
+            "topic": "order_statistics",
+            "specific_requirements": ["order_count", "monthly_report"]
+        }
+    }
+
+    LƯU Ý QUAN TRỌNG:
+    1. PHÂN TÍCH KỸ câu hỏi trước khi chọn agent
+    2. Xem xét ngữ cảnh và mục đích thực sự
+    3. KHÔNG chỉ dựa vào từ khóa đơn lẻ
+    4. Chọn agent phù hợp nhất với yêu cầu
+    5. Đảm bảo response đúng trọng tâm câu hỏi
     """,
     llm_config={"config_list": config_list},
     human_input_mode="NEVER",
@@ -145,10 +210,9 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
         chat = await ShopManager.a_generate_reply(
             messages=[{"role": "user", "content": request.message}]
         )
-        print(f"Phản hồi từ agen: {chat}")
         logger.info(f"Raw ShopManager response: {chat}")
         logger.info(f"Response type: {type(chat)}")
-        
+    
         # Handle the response content
         parsed_content = None
         
@@ -172,23 +236,23 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON from markdown: {str(e)}")
                         parsed_content = {
-                            "agent": "ProductManagementAgent",
+                            "agent": "AnalyticsAgent" if "đánh giá" in request.message.lower() else "PolicyAgent" if "chính sách" in request.message.lower() else "ProductManagementAgent",
                             "query": request.message
                         }
                 else:
                     parsed_content = {
-                        "agent": "ProductManagementAgent",
+                        "agent": "AnalyticsAgent" if "đánh giá" in request.message.lower() else "PolicyAgent" if "chính sách" in request.message.lower() else "ProductManagementAgent",
                         "query": request.message
                     }
         else:
             logger.warning(f"Unexpected response type: {type(chat)}")
             parsed_content = {
-                "agent": "ProductManagementAgent",
+                "agent": "AnalyticsAgent" if "đánh giá" in request.message.lower() else "PolicyAgent" if "chính sách" in request.message.lower() else "ProductManagementAgent",
                 "query": request.message
             }
         
         logger.info(f"Parsed content: {parsed_content}")
-        parsed_content = chat
+        
         # Extract agent and query from the parsed content
         agent_type = parsed_content.get("agent")
         query = parsed_content.get("query")
@@ -243,15 +307,14 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
             try:
                 agent = MarketingAgent(shop_id=request.shop_id, db=db)
                 result = await agent.process(request)
-                
+
                 # Ensure the response content is a string
                 response_content = result.get('message', '')
                 if response_content is None:
                     response_content = "Không có phản hồi từ hệ thống."
                 elif not isinstance(response_content, str):
                     response_content = str(response_content)
-                
-                # Format the response according to the expected structure
+
                 return {
                     "agent": agent_type,
                     "response": {
@@ -263,17 +326,117 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
                 }
             finally:
                 db.close()
+
+        elif agent_type == "AnalyticsAgent":
+            from shop_chat.analytics import Analytics
+            from sqlalchemy.orm import Session
+            from db import SessionLocal
             
-        # Add other agent types here as needed
-        
+            # Create a new database session
+            db = SessionLocal()
+            try:
+                agent = Analytics(db, shop_id=request.shop_id)
+                result = await agent.process({
+                    "message": query,
+                    "shop_id": request.shop_id,
+                    "chat_history": request.context.get("chat_history", "")
+                })
+
+                # Ensure the response content is a string
+                response_content = result.get('message', '')
+                if response_content is None:
+                    response_content = "Không có phản hồi từ hệ thống."
+                elif not isinstance(response_content, str):
+                    response_content = str(response_content)
+
+                return {
+                    "agent": agent_type,
+                    "response": {
+                        "content": response_content,
+                        "type": result.get('type', 'text')
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "chat_id": request.chat_id
+                }
+            finally:
+                db.close()
+
+        elif agent_type == "PolicyAgent":
+            from shop_chat.policy import PolicyAgent
+            from sqlalchemy.orm import Session
+            from db import SessionLocal
+            
+            # Create a new database session
+            db = SessionLocal()
+            try:
+                agent = PolicyAgent(shop_id=request.shop_id, db=db)
+                result = await agent.process({
+                    "message": query,
+                    "shop_id": request.shop_id,
+                    "chat_history": request.context.get("chat_history", "")
+                })
+
+                # Ensure the response content is a string
+                response_content = result.get('message', '')
+                if response_content is None:
+                    response_content = "Không có phản hồi từ hệ thống."
+                elif not isinstance(response_content, str):
+                    response_content = str(response_content)
+
+                return {
+                    "agent": agent_type,
+                    "response": {
+                        "content": response_content,
+                        "type": result.get('type', 'text')
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "chat_id": request.chat_id
+                }
+            finally:
+                db.close()
+
+        else:
+            # Default to ProductManagementAgent if agent type is not recognized
+            from shop_chat.product_management import ProductManagement
+            from sqlalchemy.orm import Session
+            from db import SessionLocal
+            
+            # Create a new database session
+            db = SessionLocal()
+            try:
+                agent = ProductManagement(db)
+                result = await agent.process({
+                    "message": query,
+                    "shop_id": request.shop_id,
+                    "chat_history": request.context.get("chat_history", "")
+                })
+
+                # Ensure the response content is a string
+                response_content = result.get('message', '')
+                if response_content is None:
+                    response_content = "Không có phản hồi từ hệ thống."
+                elif not isinstance(response_content, str):
+                    response_content = str(response_content)
+
+                return {
+                    "agent": "ProductManagementAgent",
+                    "response": {
+                        "content": response_content,
+                        "type": result.get('type', 'text')
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "chat_id": request.chat_id
+                }
+            finally:
+                db.close()
+
     except Exception as e:
-        logger.error(f"Error processing shop chat: {str(e)}")
+        logger.error(f"Error in process_shop_chat: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
-        # Fallback to direct content if not JSON or parsing fails
         return {
-            "agent": "ShopManager",
+            "agent": "System",
             "response": {
-                "content": "Xin lỗi, tôi không thể xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "content": "Đã có lỗi xảy ra khi xử lý yêu cầu. Vui lòng thử lại sau.",
                 "type": "error"
             },
             "timestamp": datetime.now().isoformat(),

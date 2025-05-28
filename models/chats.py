@@ -70,6 +70,7 @@ class ChatResponse(BaseModel):
     last_message_at: datetime
     created_at: datetime
     updated_at: datetime
+    titles : str
 
     class Config:
         from_attributes = True

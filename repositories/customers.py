@@ -1,13 +1,13 @@
 from db import Session
 from models.customers import Customer, CustomerCreate, UpdateCustomerPayload, CustomerModel
-from models.products import Product
-from models.orders import Order
+from models.orders import Order, OrderDetail
 from models.reviews import Review
 from sqlalchemy.exc import NoResultFound
 from loguru import logger
 from datetime import datetime
 from sqlalchemy import func
 from typing import List
+from models.products import Product
 
 class CustomerRepository:
     @staticmethod
@@ -145,23 +145,37 @@ class CustomerRepository:
             return False
 
     @staticmethod
-    def get_by_shop(seller_id: int) -> List[CustomerModel]:
+    def get_by_shop(shop_id: int) -> List[CustomerModel]:
         """
-        Lấy danh sách khách hàng đã mua hàng hoặc tương tác với shop (seller)
-        thông qua reviews (JOIN qua products)
+        Lấy danh sách khách hàng đã mua hàng hoặc tương tác với shop thông qua orders hoặc reviews
         """
         try:
             with Session() as session:
+                # Lấy khách hàng thông qua orders
+                customers_from_orders = session.query(Customer).join(
+                    Order, Customer.customer_id == Order.customer_id
+                ).join(
+                    OrderDetail, Order.order_id == OrderDetail.order_id
+                ).join(
+                    Product, OrderDetail.product_id == Product.product_id
+                ).filter(
+                    Product.seller_id == shop_id
+                ).distinct().all()
+
+                # Lấy khách hàng thông qua reviews
                 customers_from_reviews = session.query(Customer).join(
                     Review, Customer.customer_id == Review.customer_id
                 ).join(
                     Product, Review.product_id == Product.product_id
                 ).filter(
-                    Product.seller_id == seller_id
+                    Product.seller_id == shop_id
                 ).distinct().all()
-                if not customers_from_reviews:
-                    return []
-                return [CustomerModel.model_validate(customer) for customer in customers_from_reviews]
+
+                # Kết hợp và loại bỏ trùng lặp
+                all_customers = set(customers_from_orders + customers_from_reviews)
+                
+                return [CustomerModel.model_validate(customer) for customer in all_customers]
         except Exception as e:
-            logger.error(f"Lỗi khi lấy danh sách khách hàng của seller {seller_id}: {str(e)}")
+            logger.error(f"Lỗi khi lấy danh sách khách hàng của shop {shop_id}: {str(e)}")
             return []
+        

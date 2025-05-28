@@ -70,3 +70,5 @@ def get_agent_chat_messages(agent_id: str, chat_id: int):
 @router.post("/sender_and_content/chat/{chat_id}")
 def get_sender_type_and_content(chat_id: int, limit: int =  30):
     return MessageService.get_sender_type_and_content(chat_id, limit)
+
+

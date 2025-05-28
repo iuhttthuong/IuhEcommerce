@@ -56,7 +56,3 @@ class InventoryRepository:
             self.db.commit()
             return True
         return False
-
-    async def get_by_shop_id(self, shop_id: int) -> List[Inventory]:
-        """Không còn sử dụng, chỉ để tương thích. Trả về rỗng."""
-        return []

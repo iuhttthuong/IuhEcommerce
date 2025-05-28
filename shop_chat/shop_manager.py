@@ -6,6 +6,7 @@ from .product_management import ProductManagement, ProductManagementAgent
 from .inventory import Inventory
 from .marketing import Marketing
 from .customer_service import CustomerService
+from .analytics import Analytics
 from .chat_repository import ChatRepository
 from models.shops import Shop
 from models.products import Product, ProductCreate
@@ -13,6 +14,7 @@ from models.orders import Order as OrderModel, OrderCreate
 from models.customers import Customer, CustomerCreate
 from models.promotions import PromotionCreate
 from models.chats import ChatMessageCreate, ChatCreate
+from .schemas import AnalyticsRequest
 from autogen import ConversableAgent, AssistantAgent
 from env import env
 from db import get_db
@@ -31,6 +33,7 @@ class ShopManager:
         self.inventory = Inventory(db, shop_id)
         self.marketing = Marketing(db, shop_id)
         self.customer_service = CustomerService(db, shop_id)
+        self.analytics = Analytics(db, shop_id)
         self.chat_repo = ChatRepository(db)
         self.message_repo = MessageRepository
         self.agent_descriptions = {
@@ -79,37 +82,93 @@ class ShopManager:
             system_message="""
 Bạn là một trợ lý AI thông minh làm việc cho shop trên sàn thương mại điện tử IUH-Ecomerce.
 Bạn sẽ nhận đầu vào câu hỏi của chủ shop về quản lý shop.
-Nhiệm vụ của bạn là trả lời câu hỏi của chủ shop một cách chính xác và đầy đủ nhất có thể.
-Nếu bạn chưa đủ thông tin trả lời, bạn hãy sử dụng các trợ lý khác để tìm kiếm thông tin.
+Nhiệm vụ của bạn là PHÂN TÍCH KỸ câu hỏi để hiểu rõ ý định của người dùng và chọn agent phù hợp nhất để xử lý.
 
-QUAN TRỌNG:
-- Nếu người dùng hỏi về số lượng/tổng số sản phẩm, hoặc hỏi kiểu "tôi có bao nhiêu sản phẩm", "thống kê sản phẩm", "shop tôi có mấy sản phẩm", "thống kê số lượng sản phẩm"... thì KHÔNG hỏi lại, KHÔNG yêu cầu bổ sung thông tin, KHÔNG trả lời vòng vo, KHÔNG hỏi về trạng thái sản phẩm.
-- Hãy trả về đúng JSON sau (không thay đổi, không thêm bớt, không hỏi lại):
-  {"agent": "ProductManagementAgent", "query": "Thống kê tổng số sản phẩm hiện có trong shop"}
-- Nếu người dùng hỏi về danh sách sản phẩm, liệt kê sản phẩm, hãy trả về:
-  {"agent": "ProductManagementAgent", "query": "Liệt kê tất cả sản phẩm trong shop"}
-- Nếu người dùng hỏi về tồn kho, marketing, khách hàng, báo cáo, chính sách... thì chọn agent tương ứng như hướng dẫn bên dưới.
-- Chỉ hỏi lại người dùng khi thực sự không thể xác định được ý định.
+QUY TRÌNH PHÂN TÍCH CÂU HỎI:
+1. Xác định chủ đề chính
+2. Phân tích ngữ cảnh và mục đích
+3. Xác định các yêu cầu cụ thể
+4. Chọn agent phù hợp nhất
 
-Khi nhận được câu hỏi, hãy phân tích và trả về JSON với agent phù hợp:
-- Nếu là câu hỏi về danh sách sản phẩm (ví dụ: "tôi có những sản phẩm nào", "danh sách sản phẩm", "liệt kê sản phẩm") => Sử dụng ProductManagementAgent
-- Nếu là câu hỏi về thêm/sửa/xóa sản phẩm => Sử dụng ProductManagementAgent
-- Nếu là câu hỏi về tồn kho => Sử dụng InventoryAgent
-- Nếu là câu hỏi về khách hàng => Sử dụng CustomerServiceAgent
-- Nếu là câu hỏi về marketing => Sử dụng MarketingAgent
-- Nếu là câu hỏi về báo cáo => Sử dụng AnalyticsAgent
-- Nếu là câu hỏi về chính sách shop => Sử dụng PolicyAgent
+CÁC LOẠI CÂU HỎI VÀ AGENT TƯƠNG ỨNG:
 
-Hãy trả về mô tả truy vấn dưới dạng JSON:
-```json
+1. Câu hỏi về khiếu nại/phàn nàn của khách hàng:
+   - "Khách hàng phàn nàn về..."
+   - "Có người kêu sản phẩm..."
+   - "Khách hàng báo lỗi..."
+   => Sử dụng CustomerServiceAgent
+
+2. Câu hỏi về đánh giá sản phẩm:
+   - "Đánh giá sản phẩm..."
+   - "Review sản phẩm..."
+   - "Khách hàng đánh giá..."
+   => Sử dụng AnalyticsAgent
+
+3. Câu hỏi về quản lý sản phẩm:
+   - "Thêm/sửa/xóa sản phẩm"
+   - "Danh sách sản phẩm"
+   - "Thông tin sản phẩm"
+   => Sử dụng ProductManagementAgent
+
+4. Câu hỏi về tồn kho:
+   - "Kiểm tra tồn kho"
+   - "Nhập/xuất hàng"
+   - "Hết hàng"
+   => Sử dụng InventoryAgent
+
+5. Câu hỏi về marketing:
+   - "Khuyến mãi"
+   - "Giảm giá"
+   - "Quảng cáo"
+   => Sử dụng MarketingAgent
+
+6. Câu hỏi về báo cáo/phân tích:
+   - "Thống kê doanh số"
+   - "Báo cáo bán hàng"
+   - "Phân tích hiệu quả"
+   => Sử dụng AnalyticsAgent
+
+Hãy trả về JSON với cấu trúc:
 {
-    "agent": "ProductManagementAgent" | "InventoryAgent" | "MarketingAgent" | "CustomerServiceAgent" | "AnalyticsAgent" | "PolicyAgent" | "MySelf",
-    "query": String
+    "agent": "ProductManagementAgent" | "InventoryAgent" | "MarketingAgent" | "CustomerServiceAgent" | "AnalyticsAgent" | "PolicyAgent",
+    "query": String,
+    "intent": String,
+    "context": {
+        "topic": String,
+        "specific_requirements": [String]
+    }
 }
-```
 
-Tuyệt đối KHÔNG hỏi lại về trạng thái sản phẩm, danh mục, hoặc các thông tin phụ nếu người dùng chỉ hỏi tổng số sản phẩm.
-Nếu không xác định được ý định, mới hỏi lại người dùng.
+VÍ DỤ PHÂN TÍCH:
+
+1. "Có khách hàng phàn nàn sản phẩm của tôi kém chất lượng, tôi nên làm gì?"
+=> {
+    "agent": "CustomerServiceAgent",
+    "query": "Xử lý phàn nàn về chất lượng sản phẩm",
+    "intent": "handle_complaint",
+    "context": {
+        "topic": "customer_complaint",
+        "specific_requirements": ["quality_issue", "complaint_handling", "customer_satisfaction"]
+    }
+}
+
+2. "Shop tôi có bao nhiêu đơn hàng trong tháng này?"
+=> {
+    "agent": "AnalyticsAgent",
+    "query": "Thống kê số lượng đơn hàng theo tháng",
+    "intent": "sales_analysis",
+    "context": {
+        "topic": "order_statistics",
+        "specific_requirements": ["order_count", "monthly_report"]
+    }
+}
+
+LƯU Ý QUAN TRỌNG:
+1. PHÂN TÍCH KỸ câu hỏi trước khi chọn agent
+2. Xem xét ngữ cảnh và mục đích thực sự
+3. KHÔNG chỉ dựa vào từ khóa đơn lẻ
+4. Chọn agent phù hợp nhất với yêu cầu
+5. Đảm bảo response đúng trọng tâm câu hỏi
             """,
             llm_config={"config_list": config_list},
             human_input_mode="NEVER"
@@ -140,7 +199,7 @@ Nếu không xác định được ý định, mới hỏi lại người dùng.
                 # Đảm bảo response là dict và không phải None
                 if response is None:
                     response = {}
-                chat_id = response.get("chat_id")
+            chat_id = response.get("chat_id")
             if not chat_id:
                 # Tạo session chat mới nếu chưa có
                 chat_service = ChatService(self.db)
@@ -314,10 +373,10 @@ Trả về JSON với cấu trúc:
                     elif "tồn kho" in query.lower() or "kho" in query.lower():
                         result = {
                             "message": "📦 **Danh sách chức năng quản lý tồn kho**:\n\n"
-                                       "1. Kiểm tra tồn kho\n"
-                                       "2. Nhập/xuất hàng\n"
-                                       "3. Cảnh báo hết hàng\n\n"
-                                       "❓ **Bạn muốn thực hiện chức năng nào?**",
+                                     "1. Kiểm tra tồn kho\n"
+                                     "2. Nhập/xuất hàng\n"
+                                     "3. Cảnh báo hết hàng\n\n"
+                                     "❓ **Bạn muốn thực hiện chức năng nào?**",
                             "type": "text",
                             "requires_clarification": True,
                             "clarification_question": "Bạn muốn thực hiện chức năng nào trong danh sách trên?"
@@ -325,10 +384,10 @@ Trả về JSON với cấu trúc:
                     elif "marketing" in query.lower() or "khuyến mãi" in query.lower():
                         result = {
                             "message": "🎯 **Danh sách chức năng marketing**:\n\n"
-                                       "1. Tạo khuyến mãi\n"
-                                       "2. Quản lý giảm giá\n"
-                                       "3. Tạo quảng cáo\n\n"
-                                       "❓ **Bạn muốn thực hiện chức năng nào?**",
+                                     "1. Tạo khuyến mãi\n"
+                                     "2. Quản lý giảm giá\n"
+                                     "3. Tạo quảng cáo\n\n"
+                                     "❓ **Bạn muốn thực hiện chức năng nào?**",
                             "type": "text",
                             "requires_clarification": True,
                             "clarification_question": "Bạn muốn thực hiện chức năng nào trong danh sách trên?"
@@ -336,12 +395,12 @@ Trả về JSON với cấu trúc:
                     else:
                         result = {
                             "message": "ℹ️ **Danh sách chức năng chính**:\n\n"
-                                       "1. 📋 Quản lý sản phẩm\n"
-                                       "2. 📦 Quản lý tồn kho\n"
-                                       "3. 🎯 Marketing\n"
-                                       "4. 👥 Chăm sóc khách hàng\n"
-                                       "5. 📊 Báo cáo\n\n"
-                                       "❓ **Bạn muốn sử dụng chức năng nào?**",
+                                     "1. 📋 Quản lý sản phẩm\n"
+                                     "2. 📦 Quản lý tồn kho\n"
+                                     "3. 🎯 Marketing\n"
+                                     "4. 👥 Chăm sóc khách hàng\n"
+                                     "5. 📊 Báo cáo\n\n"
+                                     "❓ **Bạn muốn sử dụng chức năng nào?**",
                             "type": "text",
                             "requires_clarification": True,
                             "clarification_question": "Bạn muốn sử dụng chức năng nào trong danh sách trên?"
@@ -479,7 +538,10 @@ Lưu ý:
 - Một câu hỏi có thể cần nhiều agent
 - Độ tin cậy càng cao càng phù hợp
 - Phân tích cả ngữ cảnh chat
-- Xác định rõ lý do chọn agent"""
+- Xác định rõ lý do chọn agent
+- Ưu tiên CustomerServiceAgent cho các câu hỏi về khiếu nại/phàn nàn
+- Ưu tiên AnalyticsAgent cho các câu hỏi về đánh giá/phân tích
+- Ưu tiên ProductManagementAgent cho các câu hỏi về quản lý sản phẩm"""
 
             # Get analysis from LLM
             analysis = await self._get_llm_analysis(prompt)
@@ -489,7 +551,35 @@ Lưu ý:
                 result = json.loads(analysis)
                 if not isinstance(result, dict) or 'agents' not in result:
                     raise ValueError("Invalid analysis format")
+                
+                # Kiểm tra và điều chỉnh agent cho câu hỏi về khiếu nại
+                if any(keyword in message.lower() for keyword in ["phàn nàn", "kêu", "báo lỗi", "kém chất lượng"]):
+                    # Tìm CustomerServiceAgent trong danh sách
+                    customer_service_agent = next(
+                        (agent for agent in result["agents"] if agent["agent"] == "CustomerServiceAgent"),
+                        None
+                    )
+                    
+                    if customer_service_agent:
+                        # Tăng độ tin cậy cho CustomerServiceAgent
+                        customer_service_agent["confidence"] = 0.9
+                        customer_service_agent["intent"] = "handle_complaint"
+                        customer_service_agent["reason"] = "Câu hỏi liên quan đến khiếu nại/phàn nàn của khách hàng"
+                    else:
+                        # Thêm CustomerServiceAgent nếu chưa có
+                        result["agents"].append({
+                            "agent": "CustomerServiceAgent",
+                            "reason": "Câu hỏi liên quan đến khiếu nại/phàn nàn của khách hàng",
+                            "confidence": 0.9,
+                            "keywords": ["phàn nàn", "kém chất lượng", "khiếu nại"],
+                            "intent": "handle_complaint"
+                        })
+                    
+                    # Cập nhật primary_intent
+                    result["primary_intent"] = "handle_complaint"
+                
                 return result
+                
             except json.JSONDecodeError:
                 # If JSON parsing fails, try to extract JSON from text
                 import re
@@ -503,6 +593,20 @@ Lưu ý:
                 
         except Exception as e:
             logger.error(f"Error in _analyze_message_for_agents: {str(e)}")
+            # Return default analysis with CustomerServiceAgent for complaints
+            if any(keyword in message.lower() for keyword in ["phàn nàn", "kêu", "báo lỗi", "kém chất lượng"]):
+                return {
+                    "agents": [{
+                        "agent": "CustomerServiceAgent",
+                        "reason": "Câu hỏi liên quan đến khiếu nại/phàn nàn của khách hàng",
+                        "confidence": 0.9,
+                        "keywords": ["phàn nàn", "kém chất lượng", "khiếu nại"],
+                        "intent": "handle_complaint"
+                    }],
+                    "requires_multiple_agents": False,
+                    "primary_intent": "handle_complaint",
+                    "secondary_intents": []
+                }
             # Return default analysis with general agent
             return {
                 "agents": [{
@@ -523,19 +627,90 @@ Lưu ý:
             if agent_name == "ProductManagementAgent":
                 return await self.product_mgmt.process(request)
             elif agent_name == "InventoryAgent":
-                return await self.inventory.process(request)
+                result = await self.inventory.process(request)
+                if not result:
+                    return {
+                        "message": "❌ Không thể lấy thông tin tồn kho. Vui lòng thử lại sau.",
+                        "type": "error"
+                    }
+                return {
+                    "message": result.get("message", ""),
+                    "type": result.get("type", "text"),
+                    "data": {
+                        "inventory": result.get("inventory", []),
+                        "total_items": result.get("total_items", 0),
+                        "total_value": result.get("total_value", 0),
+                        "low_stock_items": result.get("low_stock_items", [])
+                    }
+                }
             elif agent_name == "MarketingAgent":
-                return await self.marketing.process(request)
+                result = await self.marketing.process(request)
+                if not result:
+                    return {
+                        "message": "❌ Không thể xử lý yêu cầu marketing. Vui lòng thử lại sau.",
+                        "type": "error"
+                    }
+                return {
+                    "message": result.get("message", ""),
+                    "type": result.get("type", "text"),
+                    "data": {
+                        "campaigns": result.get("campaigns", []),
+                        "promotions": result.get("promotions", []),
+                        "total_campaigns": result.get("total_campaigns", 0),
+                        "active_promotions": result.get("active_promotions", 0)
+                    }
+                }
             elif agent_name == "CustomerServiceAgent":
-                return await self.customer_service.process(request)
+                result = await self.customer_service.process(request)
+                if not result:
+                    return {
+                        "message": "❌ Không thể xử lý yêu cầu chăm sóc khách hàng. Vui lòng thử lại sau.",
+                        "type": "error"
+                    }
+                return {
+                    "message": result.get("message", ""),
+                    "type": result.get("type", "text"),
+                    "data": {
+                        "tickets": result.get("tickets", []),
+                        "reviews": result.get("reviews", []),
+                        "total_tickets": result.get("total_tickets", 0),
+                        "total_reviews": result.get("total_reviews", 0),
+                        "average_rating": result.get("average_rating", 0)
+                    }
+                }
+            elif agent_name == "AnalyticsAgent":
+                result = await self.analytics.process(request)
+                if not result:
+                    return {
+                        "message": "❌ Không thể lấy thông tin phân tích. Vui lòng thử lại sau.",
+                        "type": "error"
+                    }
+                return {
+                    "message": result.get("message", ""),
+                    "type": result.get("type", "text"),
+                    "data": {
+                        "revenue": result.get("revenue", 0),
+                        "orders": result.get("orders", 0),
+                        "customers": result.get("customers", 0),
+                        "products": result.get("products", []),
+                        "inventory": result.get("inventory", []),
+                        "metrics": result.get("metrics", {})
+                    }
+                }
             else:
                 return {
-                    "message": "Xin lỗi, tôi không hiểu yêu cầu của bạn. Bạn có thể thử lại không?",
-                    "type": "error"
+                    "message": "❌ Xin lỗi, tôi không hiểu yêu cầu của bạn. Bạn có thể thử lại không?",
+                    "type": "error",
+                    "data": {}
                 }
         except Exception as e:
             logger.error(f"Error processing with agent {agent_name}: {str(e)}")
-            return None
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {
+                "message": f"❌ Đã có lỗi xảy ra khi xử lý yêu cầu: {str(e)}",
+                "type": "error",
+                "data": {}
+            }
 
     async def _combine_agent_responses(self, responses: List[Dict[str, Any]], query: str, chat_history: str) -> Dict[str, Any]:
         """Combine responses from multiple agents."""
@@ -647,6 +822,10 @@ Hãy trả lời ngắn gọn, chính xác và hữu ích.""",
         """Create a new marketing campaign"""
         return await self.marketing.create_campaign(campaign_data)
 
+    async def get_analytics(self, request: AnalyticsRequest) -> Dict[str, Any]:
+        """Get shop analytics"""
+        return await self.analytics.get_analytics(request)
+
     async def get_shop_summary(self) -> Dict[str, Any]:
         """Get shop summary including key metrics"""
         return {
@@ -670,4 +849,4 @@ Hãy trả lời ngắn gọn, chính xác và hữu ích.""",
                 "message": "Đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
                 "type": "error",
                 "error": str(e)
-            }
+            } 

@@ -18,11 +18,17 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+# def upgrade() -> None:
+#     """Upgrade schema."""
+#     op.add_column("chats", sa.Column("titles", sa.String(255), nullable=True))
+
 def upgrade() -> None:
-    """Upgrade schema."""
-    op.add_column("chats", sa.Column("titles", sa.String(255), nullable=True))
+    # Add created_at and updated_at columns
+    op.add_column('coupons', sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False))
+    op.add_column('coupons', sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('CURRENT_TIMESTAMP'), onupdate=sa.text('CURRENT_TIMESTAMP'), nullable=False))
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
-    pass
+    # Remove created_at and updated_at columns
+    op.drop_column('coupons', 'updated_at')
+    op.drop_column('coupons', 'created_at')

@@ -241,87 +241,93 @@ class ProductManagement:
             if not shop_id:
                 return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
 
-            try:
-                # Get products from repository
-                products = self.product_repository.get_by_shop(shop_id)
-                if not products:
-                    return {
-                        "message": "Shop chưa có sản phẩm nào.",
-                        "type": "text",
-                        "total_products": 0,
-                        "products": []
-                    }
-
-                # Get inventory for each product
-                product_ids = [p.product_id for p in products]
-                inventories = [await self.inventory_repository.get_by_product_id(pid) for pid in product_ids]
-                inventory_map = {inv.product_id: inv for inv in inventories if inv}
-                
-                # Update product information with inventory data
-                for p in products:
-                    inv = inventory_map.get(p.product_id)
-                    if inv:
-                        p.current_stock = inv.current_stock
-                        p.fulfillment_type = inv.fulfillment_type
-                        p.product_virtual_type = inv.product_virtual_type
-                    else:
-                        p.current_stock = None
-                        p.fulfillment_type = None
-                        p.product_virtual_type = None
-
-                # Analyze requirements
-                requirements = await self.agent._analyze_requirements(message)
-                
-                # Process based on requirements
-                responses = []
-                
-                if requirements.get('statistics'):
-                    stats_response = await self._handle_statistics_request(products)
-                    responses.append(stats_response)
-                
-                if requirements.get('listing'):
-                    list_response = await self._handle_listing_request(products)
-                    responses.append(list_response)
-                
-                if requirements.get('detail'):
-                    detail_response = await self._handle_detail_request(message, products)
-                    responses.append(detail_response)
-                
-                if requirements.get('analysis'):
-                    analysis_response = await self._handle_analysis_request(products)
-                    responses.append(analysis_response)
-                
-                if requirements.get('optimization'):
-                    optimization_response = await self._handle_optimization_request(products)
-                    responses.append(optimization_response)
-                
-                # If no specific requirements were handled, provide a general response
-                if not responses:
-                    return {
-                        "message": f"Shop hiện có {len(products)} sản phẩm. Bạn có thể:\n"
-                                  f"1. Xem danh sách sản phẩm\n"
-                                  f"2. Xem thống kê sản phẩm\n"
-                                  f"3. Xem chi tiết sản phẩm\n"
-                                  f"4. Phân tích hiệu quả sản phẩm\n"
-                                  f"5. Tối ưu sản phẩm",
-                        "type": "text",
-                        "total_products": len(products),
-                        "products": [p.__dict__ for p in products]
-                    }
-
-                # Combine responses
-                combined_message = "\n\n".join([r.get('message', '') for r in responses])
+            # Get products from repository
+            products = self.product_repository.get_by_shop(shop_id)
+            if not products:
                 return {
-                        "message": combined_message,
-                        "type": "text",
-                        "total_products": len(products),
-                        "products": [p.__dict__ for p in products]
-                    }
+                    "message": "Shop chưa có sản phẩm nào.",
+                    "type": "text",
+                    "total_products": 0,
+                    "products": []
+                }
 
-            except Exception as e:
-                # Rollback transaction on error
-                self.db.rollback()
-                raise e
+            # Get inventory for each product
+            product_ids = [p.product_id for p in products]
+            inventories = [await self.inventory_repository.get_by_product_id(pid) for pid in product_ids]
+            inventory_map = {inv.product_id: inv for inv in inventories if inv}
+            
+            # Update product information with inventory data
+            for p in products:
+                inv = inventory_map.get(p.product_id)
+                if inv:
+                    p.current_stock = inv.current_stock
+                    p.fulfillment_type = inv.fulfillment_type
+                    p.product_virtual_type = inv.product_virtual_type
+                else:
+                    p.current_stock = None
+                    p.fulfillment_type = None
+                    p.product_virtual_type = None
+
+            # Analyze requirements
+            requirements = await self.agent._analyze_requirements(message)
+            
+            # Process based on requirements
+            responses = []
+            
+            if requirements.get('statistics'):
+                stats_response = await self._handle_statistics_request(products)
+                responses.append(stats_response)
+            
+            if requirements.get('listing'):
+                list_response = await self._handle_listing_request(products)
+                responses.append(list_response)
+            
+            if requirements.get('detail'):
+                detail_response = await self._handle_detail_request(message, products)
+                responses.append(detail_response)
+            
+            if requirements.get('analysis'):
+                analysis_response = await self._handle_analysis_request(products)
+                responses.append(analysis_response)
+            
+            if requirements.get('optimization'):
+                optimization_response = await self._handle_optimization_request(products)
+                responses.append(optimization_response)
+
+            # Add new features
+            if 'category' in message or 'danh mục' in message:
+                category_response = await self._handle_category_request(products)
+                responses.append(category_response)
+
+            if 'doanh thu' in message or 'revenue' in message:
+                revenue_response = await self._handle_revenue_request(products)
+                responses.append(revenue_response)
+            
+            # If no specific requirements were handled, provide a general response
+            if not responses:
+                return {
+                    "message": f"# Thông tin sản phẩm của shop\n\n"
+                              f"Shop hiện có **{len(products)}** sản phẩm. Bạn có thể:\n\n"
+                              f"1. Xem danh sách sản phẩm\n"
+                              f"2. Xem thống kê sản phẩm\n"
+                              f"3. Xem chi tiết sản phẩm\n"
+                              f"4. Phân tích hiệu quả sản phẩm\n"
+                              f"5. Tối ưu sản phẩm\n"
+                              f"6. Xem thống kê theo danh mục\n"
+                              f"7. Xem doanh thu theo sản phẩm",
+                    "type": "text",
+                    "total_products": len(products),
+                    "products": [p.__dict__ for p in products]
+                }
+
+            # Combine responses
+            combined_message = "\n\n".join([r.get('message', '') for r in responses])
+            return {
+                "message": combined_message,
+                "type": "text",
+                "total_products": len(products),
+                "products": [p.__dict__ for p in products]
+            }
 
         except Exception as e:
             logger.error(f"Error processing request: {str(e)}")
@@ -576,6 +582,101 @@ class ProductManagement:
             }
         except Exception as e:
             return {"message": f"Lỗi khi tìm kiếm sản phẩm: {str(e)}", "type": "search_product_error"}
+
+    async def _handle_category_request(self, products: List[Product]) -> Dict[str, Any]:
+        """Handle category statistics request."""
+        if not products:
+            return {"message": "Shop chưa có sản phẩm nào.", "type": "category"}
+
+        # Group products by category
+        categories = {}
+        for p in products:
+            category = getattr(p, 'category', 'Uncategorized')
+            if category not in categories:
+                categories[category] = {
+                    'count': 0,
+                    'total_value': 0,
+                    'total_sold': 0,
+                    'products': []
+                }
+            categories[category]['count'] += 1
+            categories[category]['total_value'] += getattr(p, 'price', 0) * getattr(p, 'current_stock', 0)
+            categories[category]['total_sold'] += getattr(p, 'quantity_sold', 0)
+            categories[category]['products'].append(p)
+
+        # Format response
+        category_info = []
+        for category, stats in categories.items():
+            category_info.append(
+                f"## {category}\n"
+                f"- Số lượng sản phẩm: **{stats['count']}**\n"
+                f"- Tổng giá trị tồn kho: **{stats['total_value']:,}đ**\n"
+                f"- Tổng số đã bán: **{stats['total_sold']}**\n"
+                f"- Top 3 sản phẩm bán chạy:\n"
+                f"{self._format_top_products(stats['products'])}"
+            )
+
+        return {
+            "message": f"# Thống kê theo danh mục\n\n" + "\n\n".join(category_info),
+            "type": "category",
+            "categories": categories
+        }
+
+    async def _handle_revenue_request(self, products: List[Product]) -> Dict[str, Any]:
+        """Handle revenue statistics request."""
+        if not products:
+            return {"message": "Shop chưa có sản phẩm nào.", "type": "revenue"}
+
+        # Calculate revenue for each product
+        product_revenue = []
+        for p in products:
+            revenue = getattr(p, 'price', 0) * getattr(p, 'quantity_sold', 0)
+            product_revenue.append({
+                'product': p,
+                'revenue': revenue
+            })
+
+        # Sort by revenue
+        product_revenue.sort(key=lambda x: x['revenue'], reverse=True)
+
+        # Format response
+        revenue_info = []
+        total_revenue = sum(item['revenue'] for item in product_revenue)
+        
+        revenue_info.append(f"# Thống kê doanh thu\n\n")
+        revenue_info.append(f"## Tổng quan\n")
+        revenue_info.append(f"- Tổng doanh thu: **{total_revenue:,}đ**\n")
+        revenue_info.append(f"- Số sản phẩm đã bán: **{len(products)}**\n")
+        revenue_info.append(f"- Doanh thu trung bình/sản phẩm: **{total_revenue/len(products):,.0f}đ**\n\n")
+        
+        revenue_info.append(f"## Top 5 sản phẩm doanh thu cao nhất\n")
+        for i, item in enumerate(product_revenue[:5], 1):
+            p = item['product']
+            revenue_info.append(
+                f"{i}. **{p.name}**\n"
+                f"   - Doanh thu: **{item['revenue']:,}đ**\n"
+                f"   - Đã bán: **{getattr(p, 'quantity_sold', 0)}**\n"
+                f"   - Giá: **{getattr(p, 'price', 0):,}đ**\n"
+            )
+
+        return {
+            "message": "\n".join(revenue_info),
+            "type": "revenue",
+            "total_revenue": total_revenue,
+            "product_revenue": product_revenue
+        }
+
+    def _format_top_products(self, products: List[Product], limit: int = 3) -> str:
+        """Format top products for display."""
+        sorted_products = sorted(products, key=lambda x: getattr(x, 'quantity_sold', 0), reverse=True)
+        result = []
+        for i, p in enumerate(sorted_products[:limit], 1):
+            result.append(
+                f"  {i}. {p.name}\n"
+                f"     - Đã bán: {getattr(p, 'quantity_sold', 0)}\n"
+                f"     - Giá: {getattr(p, 'price', 0):,}đ"
+            )
+        return "\n".join(result)
 
 @router.post("/query")
 async def query_product_management(request: ChatMessageRequest):

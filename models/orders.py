@@ -5,7 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pydantic import BaseModel
 import enum
 from models.base import Base
-# from models.order_items import OrderItem
+from models.order_details import OrderDetail
 from models.products import Product
 
 class Order(Base):
@@ -22,8 +22,8 @@ class Order(Base):
     transaction_code: Mapped[str] = mapped_column(String, nullable=False)
     
     # Relationships
-    # details = relationship("OrderDetail", back_populates="order")
-    # customer = relationship("Customer", back_populates="orders")
+    details = relationship("OrderDetail", back_populates="order")
+    customer = relationship("Customer", back_populates="orders")
 
 class OrderCreate(BaseModel):
     customer_id: int

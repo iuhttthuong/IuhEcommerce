@@ -10,7 +10,8 @@ from models.chats import (
 from models.shops import Shop
 from models.customers import Customer
 import json
-
+from openai import OpenAI
+from env import env
 class ChatService:
     def __init__(self, db: Session):
         self.db = db
@@ -21,7 +22,8 @@ class ChatService:
             shop_id=data.shop_id,
             customer_id=None if not data.customer_id or data.customer_id == 0 else data.customer_id,
             status="active",
-            last_message_at=datetime.utcnow()
+            last_message_at=datetime.utcnow(),
+            titles = "Đoạn chat mới"
         )
         self.db.add(chat)
         self.db.commit()
@@ -66,11 +68,108 @@ class ChatService:
             Chat.last_message_at.desc()
         ).all()
 
+    def get_chat_titles_by_customer_id(self, customer_id: int) -> list[str]:
+        # Khởi tạo OpenAI client (lấy key từ biến môi trường hoặc truyền trực tiếp)
+        openai_client = OpenAI(api_key= env.OPENAI_API_KEY)
+
+        chats = self.db.query(Chat).filter(
+            Chat.customer_id == customer_id
+        ).order_by(
+            Chat.last_message_at.desc()
+        ).all()
+
+        titles = []
+        for chat in chats:
+
+            title = getattr(chat, "titles", None)
+            if not title or not title.strip() or title == "Đoạn chat mới":
+                # Lấy 2 tin nhắn đầu tiên
+                messages = self.db.query(ChatMessage).filter(
+                    ChatMessage.chat_id == chat.chat_id
+                ).order_by(ChatMessage.created_at.asc()).limit(2).all()
+
+                if len(messages) == 2 and messages[0].content and messages[1].content:
+                    prompt = (
+                        f"Hãy tạo một tiêu đề thật ngắn gọn mô tả nội dung của đoạn chat giữa khách và shop dựa trên 2 tin nhắn đầu tiên:\n"
+                        f"1. {messages[0].content}\n"
+                        f"2. {messages[1].content}\n"
+                        "Chỉ trả về duy nhất một tiêu đề là một chuỗi ký tự ngắn (không giải thích, không đặt trong code, không thêm gì khác)."
+                    )
+                    try:
+                        response = openai_client.completions.create(
+                            model="gpt-4o-mini",   
+                            prompt=prompt,
+                            max_tokens=20,
+                            temperature=0.7,
+                            n=1,
+                            stop=None
+                        )
+                        generated_title = response.choices[0].text.strip()
+                        if generated_title:
+                            chat.titles = generated_title
+                            self.db.add(chat)
+                            self.db.commit()
+                            title = generated_title
+                        else:
+                            title = "Đoạn chat mới"
+                    except Exception:
+                        title = "Đoạn chat mới"
+                else:
+                    title = "Đoạn chat mới"
+            titles.append(title)
+        return titles
+    def get_chat_titles_by_shop_id(self, shop_id: int) -> list[str]:
+        openai_client = OpenAI(api_key=env.OPENAI_API_KEY)
+
+        chats = self.db.query(Chat).filter(
+            Chat.shop_id == shop_id
+        ).order_by(
+            Chat.last_message_at.desc()
+        ).all()
+
+        titles = []
+        for chat in chats:
+            title = getattr(chat, "titles", None)
+            if not title or not title.strip() or title == "Đoạn chat mới":
+                messages = self.db.query(ChatMessage).filter(
+                    ChatMessage.chat_id == chat.chat_id
+                ).order_by(ChatMessage.created_at.asc()).limit(2).all()
+
+                if len(messages) == 2 and messages[0].content and messages[1].content:
+                    prompt = (
+                        f"Hãy tạo một tiêu đề thật ngắn gọn mô tả nội dung của đoạn chat giữa khách và shop dựa trên 2 tin nhắn đầu tiên:\n"
+                        f"1. {messages[0].content}\n"
+                        f"2. {messages[1].content}\n"
+                        "Chỉ trả về duy nhất một tiêu đề là một chuỗi ký tự ngắn (không giải thích, không đặt trong code, không thêm gì khác)."
+                    )
+                    try:
+                        response = openai_client.completions.create(
+                            model="gpt-4o-mini",
+                            prompt=prompt,
+                            max_tokens=20,
+                            temperature=0.7,
+                            n=1,
+                            stop=None
+                        )
+                        generated_title = response.choices[0].text.strip()
+                        if generated_title:
+                            chat.titles = generated_title
+                            self.db.add(chat)
+                            self.db.commit()
+                            title = generated_title
+                        else:
+                            title = "Đoạn chat mới"
+                    except Exception:
+                        title = "Đoạn chat mới"
+                else:
+                    title = "Đoạn chat mới"
+            titles.append(title)
+        return titles
     def get_chat_by_shop_id(self, shop_id: int) -> List[Chat]:
         return self.db.query(Chat).filter(
             Chat.shop_id == shop_id
         ).order_by(
-            Chat.last_message_at.desc()
+            Chat.last_message_at.desc() 
         ).all()
 
     def get_active_sessions(self, shop_id: int) -> List[Chat]:

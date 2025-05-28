@@ -154,7 +154,7 @@ class Inventory:
                 return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
 
             # Lấy thông tin tồn kho
-            inventory = await self.inventory_repository.get_by_shop_id(shop_id)
+            inventory = await self.inventory_repository.get_by_product_id(str(shop_id))
             if not inventory:
                 return {
                     "message": "Shop chưa có sản phẩm nào trong tồn kho.",
@@ -173,24 +173,8 @@ class Inventory:
             # Sắp xếp sản phẩm theo số lượng tồn kho
             sorted_items = sorted(inventory_items, key=lambda x: x.current_stock, reverse=True)
             highest_stock = sorted_items[:5]  # Top 5 sản phẩm tồn kho nhiều nhất
+            lowest_stock = sorted_items[-5:]  # Top 5 sản phẩm tồn kho ít nhất
             
-            # Tạo response cho sản phẩm tồn kho nhiều nhất
-            if "tồn kho nhiều nhất" in message.lower():
-                response_message = "📊 **Top 5 sản phẩm tồn kho nhiều nhất:**\n\n"
-                for idx, item in enumerate(highest_stock, 1):
-                    response_message += f"{idx}. **Sản phẩm ID: {item.product_id}**\n"
-                    response_message += f"   - Số lượng tồn: {item.current_stock} đơn vị\n"
-                    response_message += f"   - Loại fulfillment: {item.fulfillment_type}\n"
-                    response_message += f"   - Loại sản phẩm: {item.product_virtual_type}\n\n"
-                
-                return {
-                    "message": response_message,
-                    "type": "text",
-                    "data": {
-                        "highest_stock": [{"product_id": item.product_id, "current_stock": item.current_stock} for item in highest_stock]
-                    }
-                }
-
             for item in inventory_items:
                 product_info = {
                     "product_id": item.product_id,
@@ -218,7 +202,7 @@ Dữ liệu tồn kho của shop:
 {chr(10).join([f"- {item.product_id}: {item.current_stock} đơn vị" for item in highest_stock])}
 
 3. Sản phẩm tồn kho ít nhất:
-{chr(10).join([f"- {item.product_id}: {item.current_stock} đơn vị" for item in sorted_items[-5:] if item != highest_stock[-1]])}
+{chr(10).join([f"- {item.product_id}: {item.current_stock} đơn vị" for item in lowest_stock])}
 
 Hãy phân tích và đề xuất theo cấu trúc sau:
 
@@ -274,7 +258,7 @@ Trả lời cần:
                     "total_value": total_value,
                     "inventory": inventory_info,
                     "highest_stock": [{"product_id": item.product_id, "current_stock": item.current_stock} for item in highest_stock],
-                    "lowest_stock": [{"product_id": item.product_id, "current_stock": item.current_stock} for item in sorted_items[-5:] if item != highest_stock[-1]]
+                    "lowest_stock": [{"product_id": item.product_id, "current_stock": item.current_stock} for item in lowest_stock]
                 }
             }
 
@@ -316,4 +300,4 @@ async def query_inventory(request: ChatMessageRequest):
 @router.get("/")
 async def list_inventory():
     """List all inventory items in a shop"""
-    return {"message": "List inventory endpoint"}
+    return {"message": "List inventory endpoint"} 

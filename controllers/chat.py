@@ -118,15 +118,35 @@ def delete_chat(chat_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Chat deleted successfully"}
 
+
+@router.get("/customer11/{customer_id}", response_model= List[str] )
+def get_chat_by_customer_id11(customer_id: int, db):
+    service = ChatService(db)
+    chats = service.get_chat_titles_by_customer_id(customer_id)
+    return chats
+
+
 @router.get("/customer/{customer_id}", response_model=list[ChatResponse])
 def get_chat_by_customer_id(customer_id: int, db: Session = Depends(get_db)):
+
+    a = get_chat_by_customer_id11(customer_id, db)
     service = ChatService(db)
     chats = service.get_chat_by_customer_id(customer_id)
     return chats
 
+
+@router.get("/shop11/{shop_id}", response_model = List[str])
+def get_chat_by_shop_id11(shop_id: int, db):
+    service = ChatService(db)
+    chats = service.get_chat_titles_by_shop_id(shop_id)
+    return chats
+
+
 @router.get("/shop/{shop_id}", response_model=list[ChatResponse])
 def get_chat_by_shop_id(shop_id: int, db: Session = Depends(get_db)):
+
     service = ChatService(db)
+    a = get_chat_by_shop_id11(shop_id, db)
     chats = service.get_chat_by_shop_id(shop_id)
     return chats
 
@@ -165,11 +185,11 @@ async def create_chat_message(request: ChatMessageRequest, db: Session = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/titles/")
-def get_titles_by_id(chat_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+@router.get("/titles/", response_model = str)
+def get_title_by_chat_id(chat_id: int, db: Session = Depends(get_db)) -> str:
     """
     Get chat titles by chat ID
     """
     service = ChatService(db)
-    chats = service.get_titles_by_id(chat_id)
+    chats = service.get_title_by_chat_id(chat_id)
     return chats

@@ -36,6 +36,7 @@ class Product(Base, TimestampMixin):
     brand: Mapped["Brand"] = relationship("Brand", back_populates="products", lazy="select")
     shop: Mapped["Shop"] = relationship("Shop", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Shop.shop_id", overlaps="products,seller", lazy="select")
     seller: Mapped["Seller"] = relationship("Seller", back_populates="products", foreign_keys=[seller_id], primaryjoin="Product.seller_id == Seller.seller_id", overlaps="products,shop", lazy="select")
+    order_details: Mapped[List["OrderDetail"]] = relationship("OrderDetail", back_populates="product", lazy="select")
 
     
 class ProductBase(BaseModel):
