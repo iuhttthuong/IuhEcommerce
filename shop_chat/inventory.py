@@ -137,24 +137,24 @@ Khi trả lời, bạn cần:
         }
 
 class Inventory:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, shop_id: int = None):
         self.db = db
-        self.agent = InventoryAgent()
+        self.shop_id = shop_id
+        self.agent = InventoryAgent(shop_id)
         self.inventory_repository = InventoryRepository(db)
 
     async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process an inventory management request"""
+        """Process an inventory request."""
         try:
-            # Lấy thông tin tồn kho của shop
-            shop_id = request.get('shop_id')
+            shop_id = request.get('shop_id') or self.shop_id
+            message = request.get('message', '').lower()
+            chat_history = request.get('chat_history', '')
+            
             if not shop_id:
-                return {
-                    "message": "Không tìm thấy thông tin shop.",
-                    "type": "error"
-                }
+                return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
 
             # Lấy thông tin tồn kho
-            inventory = await self.inventory_repository.get_by_virtual_type(shop_id)
+            inventory = await self.inventory_repository.get_by_shop_id(shop_id)
             if not inventory:
                 return {
                     "message": "Shop chưa có sản phẩm nào trong tồn kho.",
@@ -168,7 +168,30 @@ class Inventory:
             # Format thông tin tồn kho
             inventory_info = []
             total_value = 0
-            for item in inventory:
+            inventory_items = [inventory] if not isinstance(inventory, list) else inventory
+            
+            # Sắp xếp sản phẩm theo số lượng tồn kho
+            sorted_items = sorted(inventory_items, key=lambda x: x.current_stock, reverse=True)
+            highest_stock = sorted_items[:5]  # Top 5 sản phẩm tồn kho nhiều nhất
+            
+            # Tạo response cho sản phẩm tồn kho nhiều nhất
+            if "tồn kho nhiều nhất" in message.lower():
+                response_message = "📊 **Top 5 sản phẩm tồn kho nhiều nhất:**\n\n"
+                for idx, item in enumerate(highest_stock, 1):
+                    response_message += f"{idx}. **Sản phẩm ID: {item.product_id}**\n"
+                    response_message += f"   - Số lượng tồn: {item.current_stock} đơn vị\n"
+                    response_message += f"   - Loại fulfillment: {item.fulfillment_type}\n"
+                    response_message += f"   - Loại sản phẩm: {item.product_virtual_type}\n\n"
+                
+                return {
+                    "message": response_message,
+                    "type": "text",
+                    "data": {
+                        "highest_stock": [{"product_id": item.product_id, "current_stock": item.current_stock} for item in highest_stock]
+                    }
+                }
+
+            for item in inventory_items:
                 product_info = {
                     "product_id": item.product_id,
                     "current_stock": item.current_stock,
@@ -180,32 +203,80 @@ class Inventory:
                 if hasattr(item, 'price'):
                     total_value += item.price * item.current_stock
 
-            # Tạo response
-            response = {
-                "message": f"Thông tin tồn kho của shop:\n" + "\n".join([
-                    f"- Sản phẩm ID {item['product_id']}: {item['current_stock']} sản phẩm"
-                    for item in inventory_info
-                ]),
+            # Tạo prompt cho LLM
+            prompt = f"""Bạn là một chuyên gia tư vấn quản lý tồn kho chuyên nghiệp.
+Hãy phân tích và đề xuất chiến lược quản lý tồn kho dựa trên dữ liệu thực tế.
+
+Yêu cầu của người bán: "{message}"
+
+Dữ liệu tồn kho của shop:
+1. Tổng quan:
+   - Tổng số sản phẩm: {len(inventory_info)}
+   - Tổng giá trị tồn kho: {total_value:,}đ
+
+2. Sản phẩm tồn kho nhiều nhất:
+{chr(10).join([f"- {item.product_id}: {item.current_stock} đơn vị" for item in highest_stock])}
+
+3. Sản phẩm tồn kho ít nhất:
+{chr(10).join([f"- {item.product_id}: {item.current_stock} đơn vị" for item in sorted_items[-5:] if item != highest_stock[-1]])}
+
+Hãy phân tích và đề xuất theo cấu trúc sau:
+
+1. 📊 **Phân tích tình hình**:
+   - Đánh giá tổng quan về tồn kho
+   - Phân tích sản phẩm tồn kho nhiều/ít
+   - Xác định vấn đề cần giải quyết
+   - Đánh giá rủi ro tồn kho
+
+2. 🎯 **Chiến lược quản lý**:
+   - Đề xuất chiến lược cho từng nhóm sản phẩm
+   - Kế hoạch cân bằng tồn kho
+   - Cách thức tối ưu tồn kho
+   - Chiến lược đặt hàng
+
+3. 📈 **Kế hoạch thực hiện**:
+   - Các bước thực hiện cụ thể
+   - Thời gian và lộ trình
+   - Nguồn lực cần thiết
+   - Chỉ số đánh giá hiệu quả
+
+4. 💡 **Đề xuất sáng tạo**:
+   - Ý tưởng tối ưu tồn kho
+   - Cách tạo sự khác biệt
+   - Chiến lược tạo giá trị gia tăng
+   - Cơ hội phát triển mới
+
+5. ⚠️ **Lưu ý quan trọng**:
+   - Các rủi ro cần tránh
+   - Điểm cần lưu ý khi thực hiện
+   - Cách xử lý tình huống đặc biệt
+   - Kế hoạch dự phòng
+
+Trả lời cần:
+- Chuyên nghiệp và chi tiết
+- Tập trung vào giải pháp tối ưu
+- Đề xuất giải pháp khả thi và sáng tạo
+- Cung cấp ví dụ cụ thể
+- Sử dụng emoji phù hợp
+- Định dạng markdown rõ ràng
+- Tập trung vào lợi ích của người bán"""
+
+            # Tạo response sử dụng assistant
+            response = await self.agent.assistant.a_generate_reply(
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            return {
+                "message": response if response else "Xin lỗi, tôi không thể tạo phản hồi phù hợp. Vui lòng thử lại sau.",
                 "type": "text",
                 "data": {
                     "total_items": len(inventory_info),
                     "total_value": total_value,
-                    "inventory": inventory_info
+                    "inventory": inventory_info,
+                    "highest_stock": [{"product_id": item.product_id, "current_stock": item.current_stock} for item in highest_stock],
+                    "lowest_stock": [{"product_id": item.product_id, "current_stock": item.current_stock} for item in sorted_items[-5:] if item != highest_stock[-1]]
                 }
             }
-
-            # Thêm thông tin chi tiết nếu có yêu cầu cụ thể
-            message = request.get('message', '').lower()
-            if 'chi tiết' in message or 'detail' in message:
-                response['message'] += "\n\nChi tiết tồn kho:\n" + "\n".join([
-                    f"- Sản phẩm ID {item['product_id']}:\n"
-                    f"  + Số lượng: {item['current_stock']}\n"
-                    f"  + Loại fulfillment: {item['fulfillment_type']}\n"
-                    f"  + Loại sản phẩm: {item['product_virtual_type']}"
-                    for item in inventory_info
-                ])
-
-            return response
 
         except Exception as e:
             logger.error(f"Error processing inventory request: {str(e)}")
@@ -245,4 +316,4 @@ async def query_inventory(request: ChatMessageRequest):
 @router.get("/")
 async def list_inventory():
     """List all inventory items in a shop"""
-    return {"message": "List inventory endpoint"} 
+    return {"message": "List inventory endpoint"}

@@ -6,7 +6,6 @@ from .product_management import ProductManagement, ProductManagementAgent
 from .inventory import Inventory
 from .marketing import Marketing
 from .customer_service import CustomerService
-from .analytics import Analytics
 from .chat_repository import ChatRepository
 from models.shops import Shop
 from models.products import Product, ProductCreate
@@ -14,7 +13,6 @@ from models.orders import Order as OrderModel, OrderCreate
 from models.customers import Customer, CustomerCreate
 from models.promotions import PromotionCreate
 from models.chats import ChatMessageCreate, ChatCreate
-from .schemas import AnalyticsRequest
 from autogen import ConversableAgent, AssistantAgent
 from env import env
 from db import get_db
@@ -29,11 +27,10 @@ class ShopManager:
     def __init__(self, db: Session = Depends(get_db), shop_id: int = None):
         self.db = db
         self.shop_id = shop_id
-        self.product_mgmt = ProductManagement(db, shop_id)
+        self.product_mgmt = ProductManagement(db=db)
         self.inventory = Inventory(db, shop_id)
         self.marketing = Marketing(db, shop_id)
         self.customer_service = CustomerService(db, shop_id)
-        self.analytics = Analytics(db, shop_id)
         self.chat_repo = ChatRepository(db)
         self.message_repo = MessageRepository
         self.agent_descriptions = {
@@ -129,7 +126,7 @@ Nếu không xác định được ý định, mới hỏi lại người dùng.
                 shop_id = int(shop_id)
             else:
                 return {
-                    "message": "Bạn vui lòng cung cấp shop_id hoặc thông tin nhận diện shop để tôi có thể lấy danh sách sản phẩm.",
+                    "message": "❌ **Lỗi**: Bạn vui lòng cung cấp shop_id hoặc thông tin nhận diện shop để tôi có thể lấy danh sách sản phẩm.",
                     "type": "error",
                     "data": {
                         "response": "",
@@ -140,12 +137,15 @@ Nếu không xác định được ý định, mới hỏi lại người dùng.
 
             # Lấy chat_id từ response hoặc tạo mới nếu không có
             if not chat_id:
+                # Đảm bảo response là dict và không phải None
+                if response is None:
+                    response = {}
                 chat_id = response.get("chat_id")
-                if not chat_id:
-                    # Tạo session chat mới nếu chưa có
-                    chat_service = ChatService(self.db)
-                    chat = chat_service.create_session(ChatCreate(shop_id=shop_id))
-                    chat_id = chat.chat_id
+            if not chat_id:
+                # Tạo session chat mới nếu chưa có
+                chat_service = ChatService(self.db)
+                chat = chat_service.create_session(ChatCreate(shop_id=shop_id))
+                chat_id = chat.chat_id
 
             # Lấy lịch sử chat gần nhất (10 tin nhắn)
             chat_history = self.message_repo.get_recent_messages(chat_id, limit=10)
@@ -155,9 +155,13 @@ Nếu không xác định được ý định, mới hỏi lại người dùng.
             ])
 
             # Get agent and query from response with safe defaults
+            if response is None:
+                response = {}
             agent = response.get("agent", "ProductManagementAgent")  # Default to ProductManagementAgent
             query = response.get("query", message)  # Default to original message
-            content = response.get("response", {}).get("content", "")
+            # Đảm bảo response.get("response", {}) không bị lỗi nếu response là None
+            resp_content = response.get("response", {}) if response else {}
+            content = resp_content.get("content", "") if isinstance(resp_content, dict) else ""
 
             # Handle content based on its type
             if isinstance(content, dict):
@@ -222,10 +226,150 @@ Nếu không xác định được ý định, mới hỏi lại người dùng.
             elif responses:
                 result = responses[0]
             else:
-                result = {
-                    "message": "Xin lỗi, tôi không hiểu yêu cầu của bạn. Bạn có thể thử lại không?",
-                    "type": "error"
-                }
+                # Nếu không có phản hồi phù hợp, phân tích câu hỏi để đưa ra phản hồi chính xác hơn
+                prompt = f"""Phân tích câu hỏi của người dùng và đưa ra phản hồi phù hợp:
+
+Câu hỏi: "{query}"
+
+Ngữ cảnh chat:
+{chat_context}
+
+Các chức năng có sẵn:
+1. Quản lý sản phẩm:
+   - Xem danh sách sản phẩm
+   - Thống kê sản phẩm
+   - Chi tiết sản phẩm
+   - Phân tích hiệu quả
+   - Tối ưu sản phẩm
+
+2. Quản lý tồn kho:
+   - Kiểm tra tồn kho
+   - Nhập/xuất hàng
+   - Cảnh báo hết hàng
+
+3. Marketing:
+   - Khuyến mãi
+   - Giảm giá
+   - Quảng cáo
+
+4. Chăm sóc khách hàng:
+   - Hỗ trợ
+   - Xử lý khiếu nại
+   - Đánh giá
+
+5. Báo cáo:
+   - Doanh số
+   - Thống kê
+   - Phân tích
+
+Hãy phân tích và trả lời:
+1. Xác định ý định chính của người dùng
+2. Xác định chức năng phù hợp để xử lý
+3. Đưa ra phản hồi trực tiếp và chính xác
+4. Nếu không hiểu rõ, hỏi lại người dùng một cách cụ thể
+
+Trả về JSON với cấu trúc:
+{{
+    "message": "Câu trả lời",
+    "type": "text/error/confirmation",
+    "requires_clarification": true/false,
+    "clarification_question": "Câu hỏi làm rõ (nếu cần)",
+    "suggested_actions": ["Hành động 1", "Hành động 2"],
+    "related_topics": ["Chủ đề 1", "Chủ đề 2"]
+}}"""
+
+                try:
+                    # Sử dụng LLM để phân tích và tạo phản hồi
+                    analysis = await self._get_llm_analysis(prompt)
+                    result = json.loads(analysis)
+                    
+                    # Thêm các hành động gợi ý nếu có
+                    if result.get('suggested_actions'):
+                        result['message'] += "\n\n💡 **Bạn có thể**:\n" + "\n".join(
+                            f"- {action}" for action in result['suggested_actions']
+                        )
+                    
+                    # Thêm các chủ đề liên quan nếu có
+                    if result.get('related_topics'):
+                        result['message'] += "\n\n🔍 **Chủ đề liên quan**:\n" + "\n".join(
+                            f"- {topic}" for topic in result['related_topics']
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"Error analyzing query: {str(e)}")
+                    # Phân tích câu hỏi để đưa ra phản hồi phù hợp
+                    if "sản phẩm" in query.lower():
+                        result = {
+                            "message": "📋 **Danh sách chức năng quản lý sản phẩm**:\n\n"
+                                     "1. Xem danh sách sản phẩm\n"
+                                     "2. Thống kê sản phẩm\n"
+                                     "3. Xem chi tiết sản phẩm\n"
+                                     "4. Phân tích hiệu quả\n"
+                                     "5. Tối ưu sản phẩm\n\n"
+                                     "❓ **Bạn muốn thực hiện chức năng nào?**",
+                            "type": "text",
+                            "requires_clarification": True,
+                            "clarification_question": "Bạn muốn thực hiện chức năng nào trong danh sách trên?"
+                        }
+                    elif "tồn kho" in query.lower() or "kho" in query.lower():
+                        result = {
+                            "message": "📦 **Danh sách chức năng quản lý tồn kho**:\n\n"
+                                       "1. Kiểm tra tồn kho\n"
+                                       "2. Nhập/xuất hàng\n"
+                                       "3. Cảnh báo hết hàng\n\n"
+                                       "❓ **Bạn muốn thực hiện chức năng nào?**",
+                            "type": "text",
+                            "requires_clarification": True,
+                            "clarification_question": "Bạn muốn thực hiện chức năng nào trong danh sách trên?"
+                        }
+                    elif "marketing" in query.lower() or "khuyến mãi" in query.lower():
+                        result = {
+                            "message": "🎯 **Danh sách chức năng marketing**:\n\n"
+                                       "1. Tạo khuyến mãi\n"
+                                       "2. Quản lý giảm giá\n"
+                                       "3. Tạo quảng cáo\n\n"
+                                       "❓ **Bạn muốn thực hiện chức năng nào?**",
+                            "type": "text",
+                            "requires_clarification": True,
+                            "clarification_question": "Bạn muốn thực hiện chức năng nào trong danh sách trên?"
+                        }
+                    else:
+                        result = {
+                            "message": "ℹ️ **Danh sách chức năng chính**:\n\n"
+                                       "1. 📋 Quản lý sản phẩm\n"
+                                       "2. 📦 Quản lý tồn kho\n"
+                                       "3. 🎯 Marketing\n"
+                                       "4. 👥 Chăm sóc khách hàng\n"
+                                       "5. 📊 Báo cáo\n\n"
+                                       "❓ **Bạn muốn sử dụng chức năng nào?**",
+                            "type": "text",
+                            "requires_clarification": True,
+                            "clarification_question": "Bạn muốn sử dụng chức năng nào trong danh sách trên?"
+                        }
+
+            # Format response message in markdown
+            if result.get('message'):
+                # Format statistics
+                if 'total_products' in result:
+                    result['message'] = f"📊 **Thống kê sản phẩm**:\n{result['message']}"
+                # Format product list
+                if 'products' in result:
+                    result['message'] = f"📋 **Danh sách sản phẩm**:\n{result['message']}"
+                # Format inventory
+                if 'inventory' in result:
+                    result['message'] = f"📦 **Thông tin tồn kho**:\n{result['message']}"
+                # Format error
+                if result.get('type') == 'error':
+                    result['message'] = f"❌ **Lỗi**: {result['message']}"
+                # Format success
+                if result.get('type') == 'success':
+                    result['message'] = f"✅ **Thành công**: {result['message']}"
+                # Format confirmation
+                if result.get('type') == 'confirmation':
+                    result['message'] = f"ℹ️ **Xác nhận**: {result['message']}"
+                # Format clarification request
+                if result.get('requires_clarification'):
+                    result['message'] = f"{result['message']}\n\n❓ **Cần làm rõ**: {result.get('clarification_question', 'Bạn có thể cung cấp thêm thông tin không?')}"
 
             # Lưu tin nhắn vào lịch sử chat
             try:
@@ -297,7 +441,7 @@ Nếu không xác định được ý định, mới hỏi lại người dùng.
             logger.error(f"Error in process_chat_message: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return {
-                "message": "Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
+                "message": "❌ **Lỗi**: Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn. Vui lòng thử lại sau.",
                 "type": "error"
             }
 
@@ -384,8 +528,6 @@ Lưu ý:
                 return await self.marketing.process(request)
             elif agent_name == "CustomerServiceAgent":
                 return await self.customer_service.process(request)
-            elif agent_name == "AnalyticsAgent":
-                return await self.analytics.process(request)
             else:
                 return {
                     "message": "Xin lỗi, tôi không hiểu yêu cầu của bạn. Bạn có thể thử lại không?",
@@ -504,10 +646,6 @@ Hãy trả lời ngắn gọn, chính xác và hữu ích.""",
     async def create_marketing_campaign(self, campaign_data: PromotionCreate) -> Dict[str, Any]:
         """Create a new marketing campaign"""
         return await self.marketing.create_campaign(campaign_data)
-
-    async def get_analytics(self, request: AnalyticsRequest) -> Dict[str, Any]:
-        """Get shop analytics"""
-        return await self.analytics.get_analytics(request)
 
     async def get_shop_summary(self) -> Dict[str, Any]:
         """Get shop summary including key metrics"""

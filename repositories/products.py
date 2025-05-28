@@ -70,28 +70,33 @@ class ProductRepositories:
             logger.error(f"Error deleting product: {str(e)}")
             raise e
 
-    def get_by_shop(self, shop_id: int, skip: int = 0, limit: int = 100, category: Optional[str] = None, search: Optional[str] = None) -> List[Product]:
+    def get_by_shop(self, shop_id: int, skip: int = 0, limit: int = 1000, category: Optional[str] = None, search: Optional[str] = None) -> List[Product]:
         """Get products by shop with optional filtering"""
-        query = self.db.query(Product).filter(Product.seller_id == shop_id)
-        
-        if category:
-            query = query.filter(Product.category_id == category)
-        if search:
-            search_term = f"%{search}%"
-            query = query.filter(
-                or_(
-                    Product.name.ilike(search_term),
-                    Product.description.ilike(search_term)
-                )
-            )
+        try:
+            query = self.db.query(Product).filter(Product.seller_id == shop_id)
             
-        return query.offset(skip).limit(limit).all()
+            if category:
+                query = query.filter(Product.category_id == category)
+            if search:
+                search_term = f"%{search}%"
+                query = query.filter(
+                    or_(
+                        Product.name.ilike(search_term),
+                        Product.description.ilike(search_term)
+                    )
+                )
+                
+            return query.offset(skip).limit(limit).all()
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error getting products by shop: {str(e)}")
+            raise e
 
     def get_active_products(
         self,
         shop_id: int,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 1000
     ) -> List[Product]:
         """Get active products for a shop"""
         return self.db.query(Product).filter(

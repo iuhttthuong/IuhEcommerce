@@ -141,10 +141,11 @@ ShopManager = ConversableAgent(
 async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
     try:
         # Get response from ShopManager
-        print(f"✅🙌❎🤷‍♂️🤦‍♀️🤦‍♀️{request.mesage}")
+        print(f"✅🙌❎🤷‍♂️🤦‍♀️🤦‍♀️{request.message}")
         chat = await ShopManager.a_generate_reply(
             messages=[{"role": "user", "content": request.message}]
         )
+        print(f"Phản hồi từ agen: {chat}")
         logger.info(f"Raw ShopManager response: {chat}")
         logger.info(f"Response type: {type(chat)}")
         
@@ -187,7 +188,7 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
             }
         
         logger.info(f"Parsed content: {parsed_content}")
-        
+        parsed_content = chat
         # Extract agent and query from the parsed content
         agent_type = parsed_content.get("agent")
         query = parsed_content.get("query")

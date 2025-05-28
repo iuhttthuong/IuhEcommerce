@@ -15,7 +15,7 @@ class Chat(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active, closed
     last_message_at: Mapped[datetime] = mapped_column(nullable=False)
     context: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    
+    titles: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None)
     # Relationships
     shop = relationship("Shop", back_populates="chat_sessions")
     customer = relationship("Customer", back_populates="chats")

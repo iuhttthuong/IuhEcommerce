@@ -41,13 +41,13 @@ class ChatService:
             updated_at=datetime.utcnow()
         )
         self.db.add(message)
-        
+
         # Update last_message_at in chat
         chat = self.get_session(data.chat_id)
         if chat:
             chat.last_message_at = message.created_at or datetime.utcnow()
             self.db.add(chat)
-        
+
         self.db.commit()
         self.db.refresh(message)
         return message
@@ -83,7 +83,7 @@ class ChatService:
         chat = self.get_session(chat_id)
         if not chat:
             raise HTTPException(status_code=404, detail="Chat session not found")
-        
+
         chat.status = "closed"
         self.db.add(chat)
         self.db.commit()
@@ -176,3 +176,9 @@ class ChatService:
             "average_response_time": avg_response_time,
             "peak_hours": peak_hours
         }
+
+    def get_title_by_chat_id(self, chat_id: int) -> str:
+        chat = self.get_session(chat_id)
+        if chat and hasattr(chat, "titles") and chat.titles:
+            return chat.titles
+        return "Đoạn chat mới"

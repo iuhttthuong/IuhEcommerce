@@ -241,81 +241,87 @@ class ProductManagement:
             if not shop_id:
                 return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
 
-            # Get products from repository
-            products = self.product_repository.get_by_shop(shop_id)
-            if not products:
+            try:
+                # Get products from repository
+                products = self.product_repository.get_by_shop(shop_id)
+                if not products:
+                    return {
+                        "message": "Shop chưa có sản phẩm nào.",
+                        "type": "text",
+                        "total_products": 0,
+                        "products": []
+                    }
+
+                # Get inventory for each product
+                product_ids = [p.product_id for p in products]
+                inventories = [await self.inventory_repository.get_by_product_id(pid) for pid in product_ids]
+                inventory_map = {inv.product_id: inv for inv in inventories if inv}
+                
+                # Update product information with inventory data
+                for p in products:
+                    inv = inventory_map.get(p.product_id)
+                    if inv:
+                        p.current_stock = inv.current_stock
+                        p.fulfillment_type = inv.fulfillment_type
+                        p.product_virtual_type = inv.product_virtual_type
+                    else:
+                        p.current_stock = None
+                        p.fulfillment_type = None
+                        p.product_virtual_type = None
+
+                # Analyze requirements
+                requirements = await self.agent._analyze_requirements(message)
+                
+                # Process based on requirements
+                responses = []
+                
+                if requirements.get('statistics'):
+                    stats_response = await self._handle_statistics_request(products)
+                    responses.append(stats_response)
+                
+                if requirements.get('listing'):
+                    list_response = await self._handle_listing_request(products)
+                    responses.append(list_response)
+                
+                if requirements.get('detail'):
+                    detail_response = await self._handle_detail_request(message, products)
+                    responses.append(detail_response)
+                
+                if requirements.get('analysis'):
+                    analysis_response = await self._handle_analysis_request(products)
+                    responses.append(analysis_response)
+                
+                if requirements.get('optimization'):
+                    optimization_response = await self._handle_optimization_request(products)
+                    responses.append(optimization_response)
+                
+                # If no specific requirements were handled, provide a general response
+                if not responses:
+                    return {
+                        "message": f"Shop hiện có {len(products)} sản phẩm. Bạn có thể:\n"
+                                  f"1. Xem danh sách sản phẩm\n"
+                                  f"2. Xem thống kê sản phẩm\n"
+                                  f"3. Xem chi tiết sản phẩm\n"
+                                  f"4. Phân tích hiệu quả sản phẩm\n"
+                                  f"5. Tối ưu sản phẩm",
+                        "type": "text",
+                        "total_products": len(products),
+                        "products": [p.__dict__ for p in products]
+                    }
+
+                # Combine responses
+                combined_message = "\n\n".join([r.get('message', '') for r in responses])
                 return {
-                    "message": "Shop chưa có sản phẩm nào.",
-                    "type": "text",
-                    "total_products": 0,
-                    "products": []
-                }
+                        "message": combined_message,
+                        "type": "text",
+                        "total_products": len(products),
+                        "products": [p.__dict__ for p in products]
+                    }
 
-            # Get inventory for each product
-            product_ids = [p.product_id for p in products]
-            inventories = [await self.inventory_repository.get_by_product_id(pid) for pid in product_ids]
-            inventory_map = {inv.product_id: inv for inv in inventories if inv}
-            
-            # Update product information with inventory data
-            for p in products:
-                inv = inventory_map.get(p.product_id)
-                if inv:
-                    p.current_stock = inv.current_stock
-                    p.fulfillment_type = inv.fulfillment_type
-                    p.product_virtual_type = inv.product_virtual_type
-                else:
-                    p.current_stock = None
-                    p.fulfillment_type = None
-                    p.product_virtual_type = None
-
-            # Analyze requirements
-            requirements = await self.agent._analyze_requirements(message)
-            
-            # Process based on requirements
-            responses = []
-            
-            if requirements.get('statistics'):
-                stats_response = await self._handle_statistics_request(products)
-                responses.append(stats_response)
-            
-            if requirements.get('listing'):
-                list_response = await self._handle_listing_request(products)
-                responses.append(list_response)
-            
-            if requirements.get('detail'):
-                detail_response = await self._handle_detail_request(message, products)
-                responses.append(detail_response)
-            
-            if requirements.get('analysis'):
-                analysis_response = await self._handle_analysis_request(products)
-                responses.append(analysis_response)
-            
-            if requirements.get('optimization'):
-                optimization_response = await self._handle_optimization_request(products)
-                responses.append(optimization_response)
-            
-            # If no specific requirements were handled, provide a general response
-            if not responses:
-                return {
-                    "message": f"Shop hiện có {len(products)} sản phẩm. Bạn có thể:\n"
-                              f"1. Xem danh sách sản phẩm\n"
-                              f"2. Xem thống kê sản phẩm\n"
-                              f"3. Xem chi tiết sản phẩm\n"
-                              f"4. Phân tích hiệu quả sản phẩm\n"
-                              f"5. Tối ưu sản phẩm",
-                    "type": "text",
-                    "total_products": len(products),
-                    "products": [p.__dict__ for p in products]
-                }
-
-            # Combine responses
-            combined_message = "\n\n".join([r.get('message', '') for r in responses])
-            return {
-                "message": combined_message,
-                "type": "text",
-                "total_products": len(products),
-                "products": [p.__dict__ for p in products]
-            }
+            except Exception as e:
+                # Rollback transaction on error
+                self.db.rollback()
+                raise e
 
         except Exception as e:
             logger.error(f"Error processing request: {str(e)}")

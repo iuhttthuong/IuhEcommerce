@@ -50,7 +50,7 @@ class ProductServices:
         self,
         shop_id: int,
         skip: int = 0,
-        limit: int = 100,
+        limit: int = 1000,
         category: Optional[str] = None,
         search: Optional[str] = None
     ) -> List[Product]:
@@ -67,7 +67,7 @@ class ProductServices:
         self,
         shop_id: int,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 1000
     ) -> List[Product]:
         """Get active products for a shop"""
         return self.repository.get_active_products(

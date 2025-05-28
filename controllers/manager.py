@@ -266,13 +266,7 @@ async def call_agent(agent, request: ChatbotRequest, raw_message: Optional[str] 
         )
         MessageRepository.create_message(response_payload)
         print("Đã lưu phản hồi của agent vào cơ sở dữ liệu.")
-        return {
-            "agent_id": agent_response.agent_id,
-            "agent_type": agent_response.agent_type,
-            "content": final_agent_response,
-            "metadata": agent_response.metadata,
-        }
-
+        return final_agent_response
     except Exception as e:
         logger.error(f"Error in call_agent: {str(e)}")
         return AgentResponse(

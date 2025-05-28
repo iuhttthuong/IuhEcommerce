@@ -24,7 +24,7 @@ class InventoryRepository:
         """Get inventory item by product ID"""
         return self.db.query(Inventory).filter(Inventory.product_id == product_id).first()
 
-    async def get_by_virtual_type(self, virtual_type: int) -> List[Inventory]:
+    async def get_by_virtual_type(self, virtual_type: str) -> List[Inventory]:
         """Get all inventory items for a virtual type"""
         return self.db.query(Inventory).filter(Inventory.product_virtual_type == virtual_type).all()
 
@@ -43,7 +43,7 @@ class InventoryRepository:
             Inventory.current_stock <= threshold
         ).all()
 
-    async def get_total_stock_by_virtual_type(self, virtual_type: int) -> int:
+    async def get_total_stock_by_virtual_type(self, virtual_type: str) -> int:
         """Calculate total stock for a virtual type"""
         inventory_items = await self.get_by_virtual_type(virtual_type)
         return sum(item.current_stock or 0 for item in inventory_items)
@@ -56,3 +56,7 @@ class InventoryRepository:
             self.db.commit()
             return True
         return False
+
+    async def get_by_shop_id(self, shop_id: int) -> List[Inventory]:
+        """Không còn sử dụng, chỉ để tương thích. Trả về rỗng."""
+        return []

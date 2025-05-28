@@ -64,13 +64,19 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://bcbc-2405-4802-9072-c0c0-3d53-b4dd-f896-11bb.ngrok-free.app/",
     ],  # ghi rõ domain FE
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+# # Cấu hình CORS
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 app.include_router(auths.router, prefix = "/api")
 app.include_router(synthetic.router, prefix="/api/synthetic", tags=["Synthetic Data"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])

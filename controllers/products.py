@@ -55,7 +55,7 @@ async def get_products_by_category(
 async def get_shop_products(
     shop_id: int,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,
     category: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db)
@@ -68,7 +68,7 @@ async def get_shop_products(
 async def get_active_shop_products(
     shop_id: int,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,
     db: Session = Depends(get_db)
 ):
     """Get active products for a shop"""

@@ -8,7 +8,7 @@ from .products import Product, ProductCreate, ProductUpdate, ProductResponse
 from .categories import Category, CategoryCreate, CategoryUpdate, CategoryResponse
 from .promotions import Promotion, PromotionCreate, PromotionUpdate, PromotionResponse
 from .shipping import Shipping, ShippingCreate, ShippingUpdate, ShippingResponse
-from .analytics import Analytics, AnalyticsCreate, AnalyticsUpdate, AnalyticsResponse
+# from .analytics import Analytics, AnalyticsCreate, AnalyticsUpdate, AnalyticsResponse
 
 __all__ = [
     'Base', 'TimestampMixin',
@@ -20,5 +20,5 @@ __all__ = [
     'Product', 'ProductCreate', 'ProductUpdate', 'ProductResponse',
     'Category', 'CategoryCreate', 'CategoryUpdate', 'CategoryResponse',
     'Promotion', 'PromotionCreate', 'PromotionUpdate', 'PromotionResponse',
-    'Analytics', 'AnalyticsCreate', 'AnalyticsUpdate', 'AnalyticsResponse',
+    # 'Analytics', 'AnalyticsCreate', 'AnalyticsUpdate', 'AnalyticsResponse',
 ] 

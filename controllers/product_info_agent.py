@@ -538,7 +538,7 @@ class ProductInfoAgent:
                 keyword_prompt = f"""
                 Từ câu hỏi của người dùng, hãy trích xuất từ khóa sản phẩm chính.
                 Chỉ trả về từ khóa, không thêm giải thích hay định dạng.
-
+                Nếu có tên sản phẩm cụ thể, hãy sử dụng tên đó.
                 Câu hỏi: {request.message}
                 """
                 

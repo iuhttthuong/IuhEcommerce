@@ -43,7 +43,7 @@ class ShopServices:
             db.close()
 
     @staticmethod
-    def get_all(skip: int = 0, limit: int = 100) -> List[Shop]:
+    def get_all(skip: int = 0, limit: int = 1000) -> List[Shop]:
         """Get a list of shops with pagination."""
         db = DBSession()
         try:

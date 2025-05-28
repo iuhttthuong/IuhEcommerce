@@ -6,10 +6,11 @@ from env import env
 
 
 async def get_chat_history(chat_id: int, api_url: str, timeout: float = 10.0):
-    url = f"{api_url}/api/customer/messages/messages/recent/{chat_id}?limit=5"
+    # url = f"{api_url}/api/customer/messages/messages/recent/{chat_id}?limit=20"
+    url =  f"{api_url}/api/customer/messages/messages/sender_and_content/chat/{chat_id}?limit=30"
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url)
+            resp = await client.post(url)
             resp.raise_for_status()
             messages = resp.json()
     except httpx.ReadTimeout:
@@ -89,6 +90,8 @@ Hoặc:
 
 Ghi chú:
 Có thể mở rộng Info tùy từng trường hợp, miễn là thông tin trích xuất nằm trong nội dung cuộc hội thoại.
+Nếu có thông tin về sản phẩm, dịch vụ, chính sách, hãy trích xuất và đưa vào trường "Info".
+Nếu khách hành dùng số thứ tự để ám chỉ sản phẩm, dịch vụ, hãy chuyển đổi chúng thành tên đầy đủ hoặc mô tả ngắn gọn.
 Nếu không có thông tin nào nổi bật ngoài câu hỏi chính, Info có thể là {} hoặc không cần thêm trường.
 
 """

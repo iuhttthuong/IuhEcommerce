@@ -1,9 +1,13 @@
 from db import Session
 from models.customers import Customer, CustomerCreate, UpdateCustomerPayload, CustomerModel
+from models.products import Product
+from models.orders import Order
+from models.reviews import Review
 from sqlalchemy.exc import NoResultFound
 from loguru import logger
 from datetime import datetime
 from sqlalchemy import func
+from typing import List
 
 class CustomerRepository:
     @staticmethod
@@ -139,4 +143,25 @@ class CustomerRepository:
         except Exception as e:
             logger.error(f"Lỗi khi kiểm tra khách hàng với ID {customer_id}: {str(e)}")
             return False
-        
+
+    @staticmethod
+    def get_by_shop(seller_id: int) -> List[CustomerModel]:
+        """
+        Lấy danh sách khách hàng đã mua hàng hoặc tương tác với shop (seller)
+        thông qua reviews (JOIN qua products)
+        """
+        try:
+            with Session() as session:
+                customers_from_reviews = session.query(Customer).join(
+                    Review, Customer.customer_id == Review.customer_id
+                ).join(
+                    Product, Review.product_id == Product.product_id
+                ).filter(
+                    Product.seller_id == seller_id
+                ).distinct().all()
+                if not customers_from_reviews:
+                    return []
+                return [CustomerModel.model_validate(customer) for customer in customers_from_reviews]
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy danh sách khách hàng của seller {seller_id}: {str(e)}")
+            return []

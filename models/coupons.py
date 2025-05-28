@@ -13,21 +13,20 @@ class Coupon(Base, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     discount_type: Mapped[str] = mapped_column(String, nullable=False)  # percentage, fixed_amount
     discount_value: Mapped[float] = mapped_column(Numeric, nullable=False)
-    min_order_value: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
+    min_purchase: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
     max_discount: Mapped[Optional[float]] = mapped_column(Numeric, nullable=True)
     start_date: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
     end_date: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
     usage_limit: Mapped[Optional[int]] = mapped_column(nullable=True)
     usage_count: Mapped[int] = mapped_column(default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    coupon_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
-class CouponCreate(BaseModel):
+class CouponBase(BaseModel):
     code: str
     description: Optional[str] = None
     discount_type: str
     discount_value: float
-    min_order_value: Optional[float] = None
+    min_purchase: Optional[float] = None
     max_discount: Optional[float] = None
     start_date: datetime
     end_date: datetime
@@ -38,6 +37,9 @@ class CouponCreate(BaseModel):
         from_attributes = True
         validate_by_name = True
         use_enum_values = True
+
+class CouponCreate(CouponBase):
+    pass
 
 class CouponUpdate(BaseModel):
     description: Optional[str] = None
@@ -56,20 +58,10 @@ class CouponUpdate(BaseModel):
         validate_by_name = True
         use_enum_values = True
 
-class CouponResponse(BaseModel):
+class CouponResponse(CouponBase):
     coupon_id: int
-    code: str
-    description: Optional[str]
-    discount_type: str
-    discount_value: float
-    min_order_value: Optional[float]
-    max_discount: Optional[float]
-    start_date: datetime
-    end_date: datetime
-    usage_limit: Optional[int]
     usage_count: int
     is_active: bool
-    coupon_metadata: Optional[dict]
     created_at: datetime
     updated_at: datetime
 

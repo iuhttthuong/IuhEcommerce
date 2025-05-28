@@ -47,3 +47,12 @@ class ChatRepository:
         with Session() as session:
             chats = session.query(Chat).filter(Chat.shop_id == shop_id).all()
             return [ChatResponse.model_validate(chat) for chat in chats]
+
+
+    @staticmethod
+    def get_title_by_chat_id(chat_id: int) -> str:
+        with Session() as session:
+            chat = session.get(Chat , chat_id)
+            if chat:
+                return chat.titles
+            return "Đoạn chat mới"

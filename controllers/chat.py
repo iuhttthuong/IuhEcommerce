@@ -10,6 +10,7 @@ from shop_chat.base import ShopRequest, ChatMessageRequest
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import logging
+from repositories.chat import ChatRepository
 
 logger = logging.getLogger(__name__)
 
@@ -143,10 +144,10 @@ async def create_chat_message(request: ChatMessageRequest, db: Session = Depends
             agent_messages=[],
             filters={}
         )
-        
+
         # Process the request
         response = await process_shop_chat(shop_request)
-        
+
         # Save the message to database
         message_repository = MessageRepository()
         message = ChatMessageCreate(
@@ -157,8 +158,18 @@ async def create_chat_message(request: ChatMessageRequest, db: Session = Depends
             message_metadata=request.message_metadata
         )
         message_repository.create_message(message)
-        
+
         return response
     except Exception as e:
         logger.error(f"Error in create_chat_message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/titles/")
+def get_titles_by_id(chat_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Get chat titles by chat ID
+    """
+    service = ChatService(db)
+    chats = service.get_titles_by_id(chat_id)
+    return chats

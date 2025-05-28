@@ -143,30 +143,24 @@ Khi trả lời, bạn cần:
         return "Xin lỗi, tôi không thể tìm thấy thông tin chi tiết về vấn đề này. Vui lòng liên hệ bộ phận hỗ trợ shop để được tư vấn cụ thể hơn."
 
 class CustomerService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, shop_id: int = None):
         self.db = db
-        self.agent = CustomerServiceAgent()
+        self.shop_id = shop_id
+        self.agent = CustomerServiceAgent(shop_id)
         self.customer_repository = CustomerRepository()
 
     async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a customer service request"""
+        """Process a customer service request."""
         try:
-            shop_id = request.get('shop_id')
+            shop_id = request.get('shop_id') or self.shop_id
+            message = request.get('message', '').lower()
+            chat_history = request.get('chat_history', '')
+            
             if not shop_id:
-                return {
-                    "message": "Không tìm thấy thông tin shop.",
-                    "type": "error"
-                }
+                return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
 
             # Lấy thông tin khách hàng của shop
-            # TODO: Cần thêm phương thức get_by_shop vào CustomerRepository
-            # Tạm thời lấy tất cả khách hàng
-            customers = []
-            with Session() as session:
-                customers = session.query(Customer).all()
-                # Convert to CustomerModel
-                customers = [CustomerModel.model_validate(customer) for customer in customers]
-
+            customers = self.customer_repository.get_by_shop(shop_id)
             if not customers:
                 return {
                     "message": "Shop chưa có khách hàng nào.",
@@ -208,7 +202,6 @@ class CustomerService:
             }
 
             # Thêm thông tin chi tiết nếu có yêu cầu cụ thể
-            message = request.get('message', '').lower()
             if 'chi tiết' in message or 'detail' in message:
                 response['message'] += "\n\nChi tiết khách hàng:\n" + "\n".join([
                     f"- Khách hàng: {customer['name']}\n"
