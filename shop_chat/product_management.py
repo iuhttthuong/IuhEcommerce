@@ -128,7 +128,7 @@ Khi trả lời, bạn cần:
                     for p in unsold
                 )
                 return {
-                    "message": f"Danh sách sản phẩm chưa bán được hàng:\n{product_info}",
+                    "message": f"## Danh sách sản phẩm chưa bán được hàng:\n{product_info}",
                     "type": "unsold_products",
                     "total_products": len(unsold),
                     "products": [p.__dict__ for p in unsold]

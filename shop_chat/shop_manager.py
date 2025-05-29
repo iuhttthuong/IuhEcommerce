@@ -641,4 +641,4 @@ Hãy trả lời ngắn gọn, chính xác và hữu ích.""",
         return {
             "message": "Cảm ơn bạn đã trò chuyện! Nếu bạn cần hỗ trợ gì về shop, hãy đặt câu hỏi nhé!",
             "type": "text"
-        } 
+            } 

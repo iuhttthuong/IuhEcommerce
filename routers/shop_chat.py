@@ -67,10 +67,10 @@ async def process_message(session_id: int, message: str, shop_id: int, db: Sessi
         response = await process_shop_chat(shop_request)
         logger.info(f"Response from shop chat: {response}")
         logger.info(f"Response type: {type(response)}")
-        print(f"✅🤦‍♀️➡️❎💣😊🙌😁Response: {response}")
+        print(f"✅🤦‍♀️➡️❎💣😊🙌😁Response: {response['response']['content']}")
 
-        if response["agent"] == "MakertingAgent":
-            
+        if response["agent"] == "MarketingAgent":
+            print("đã trả về maketing agent")
             service.add_message(
                 ChatMessageCreate(
                     chat_id=session_id,
@@ -82,6 +82,7 @@ async def process_message(session_id: int, message: str, shop_id: int, db: Sessi
                     ),
                 )
             )
+            # print(response)
             return response["response"]["content"]
 
         answer = shop_manager.process_chat_message(message, response, shop_id, session_id)
