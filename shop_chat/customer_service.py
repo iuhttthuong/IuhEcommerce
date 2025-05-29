@@ -76,11 +76,24 @@ Khi trả lời, bạn cần:
             message = request.get('message', '')
             shop_id = request.get('shop_id')
             chat_history = request.get('chat_history', '')
+            intent = request.get('intent', '')
             
             if not shop_id:
                 return {
                     "message": "Không tìm thấy thông tin shop.",
                     "type": "error"
+                }
+
+            # Xử lý intent khiếu nại
+            if intent == "deny_complaint":
+                return {
+                    "message": "Tôi đã ghi nhận, hiện tại không có khách hàng nào phàn nàn trực tiếp với bạn. Nếu có phản hồi cụ thể, bạn hãy cung cấp để tôi hỗ trợ xử lý.",
+                    "type": "text"
+                }
+            elif intent == "real_complaint":
+                return {
+                    "message": "Đã phát hiện khiếu nại của khách hàng. Vui lòng kiểm tra chi tiết và xử lý theo quy trình chăm sóc khách hàng.",
+                    "type": "text"
                 }
 
             # Tạo prompt cho LLM
@@ -155,9 +168,22 @@ class CustomerService:
             shop_id = request.get('shop_id') or self.shop_id
             message = request.get('message', '').lower()
             chat_history = request.get('chat_history', '')
+            intent = request.get('intent', '')
             
             if not shop_id:
                 return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
+
+            # Xử lý intent khiếu nại
+            if intent == "deny_complaint":
+                return {
+                    "message": "Tôi đã ghi nhận, hiện tại không có khách hàng nào phàn nàn trực tiếp với bạn. Nếu có phản hồi cụ thể, bạn hãy cung cấp để tôi hỗ trợ xử lý.",
+                    "type": "text"
+                }
+            elif intent == "real_complaint":
+                return {
+                    "message": "Đã phát hiện khiếu nại của khách hàng. Vui lòng kiểm tra chi tiết và xử lý theo quy trình chăm sóc khách hàng.",
+                    "type": "text"
+                }
 
             # Lấy thông tin khách hàng của shop
             customers = self.customer_repository.get_by_shop(shop_id)

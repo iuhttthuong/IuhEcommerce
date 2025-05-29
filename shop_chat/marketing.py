@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from services.search import SearchServices
 import traceback
 from decimal import Decimal
+import re
 
 router = APIRouter(prefix="/shop/marketing", tags=["Shop Marketing"])
 
@@ -74,10 +75,13 @@ Khi trả lời, bạn cần:
     async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a marketing request."""
         try:
-            message = request.get('message', '')
-            shop_id = request.get('shop_id')
-            chat_history = request.get('chat_history', '')
-            
+            print(f"requet 🤷‍♂️��‍♂️🙌🙌🙌🙌🙌🙌🙌🙌🙌{request}")
+            print(request)
+            message = request.message
+            shop_id = request.shop_id
+            # chat_history = request.['chat_history']
+            chat_history = ""
+
             if not shop_id:
                 return {
                     "message": "Không tìm thấy thông tin shop.",
@@ -86,17 +90,17 @@ Khi trả lời, bạn cần:
 
             # Tạo prompt cho LLM
             prompt = self._build_prompt(message, f"Shop ID: {shop_id}\nChat History:\n{chat_history}")
-            
+
             # Tạo response sử dụng assistant
             response = await self.assistant.a_generate_reply(
                 messages=[{"role": "user", "content": prompt}]
             )
-            
+
             return {
                 "message": response if response else self._get_fallback_response(),
                 "type": "text"
             }
-            
+
         except Exception as e:
             logger.error(f"Error in MarketingAgent.process: {str(e)}")
             return {
@@ -165,6 +169,50 @@ class Marketing:
     async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a marketing request"""
         try:
+            message = request.get('message', '').lower()
+            context = request.get('context', {})
+            intent = request.get('intent', '')
+            # Tự động trích xuất thông tin từ message và merge vào context
+            for k, v in extract_campaign_info_from_message(message).items():
+                if v and not context.get(k):
+                    context[k] = v
+
+            # Nới lỏng điều kiện tạo coupon: nếu có campaign_goal, budget, duration thì tạo coupon, các trường còn lại điền mặc định
+            defaults = {
+                'channels': 'Facebook, Google',
+                'target_audience': 'Tất cả khách hàng'
+            }
+            for k, v in defaults.items():
+                if not context.get(k):
+                    context[k] = v
+            if context.get('campaign_goal') and context.get('budget') and context.get('duration'):
+                from models.coupons import CouponCreate
+                try:
+                    coupon_data = CouponCreate(
+                        code=context.get('code', f"SALE{datetime.now().strftime('%Y%m%d%H%M%S')}")[:20],
+                        description=context.get('campaign_goal', ''),
+                        discount_type=context.get('discount_type', 'percent'),
+                        discount_value=float(context.get('discount_value', 10)),
+                        min_purchase=float(context.get('min_purchase', 0)),
+                        max_discount=float(context.get('max_discount', 0)),
+                        start_date=context.get('start_date', datetime.now()),
+                        end_date=context.get('end_date', datetime.now()),
+                        is_active=True,
+                        usage_limit=int(context.get('usage_limit', 100)),
+                    )
+                    coupon = self.marketing_repository.create(coupon_data)
+                    return {
+                        "message": f"Đã tạo chiến lược/chiến dịch thành công với mã: {coupon.code}",
+                        "type": "success",
+                        "data": {"coupon_id": coupon.coupon_id}
+                    }
+                except Exception as e:
+                    logger.error(f"Error creating campaign coupon: {str(e)}")
+                    return {
+                        "message": "Không thể tạo chiến lược/chiến dịch. Vui lòng thử lại sau.",
+                        "type": "error"
+                    }
+
             # Lấy thông tin chiến dịch marketing
             campaigns = self.marketing_repository.get_active_campaigns()
             if not campaigns:
@@ -217,7 +265,6 @@ class Marketing:
             }
 
             # Thêm thông tin chi tiết nếu có yêu cầu cụ thể
-            message = request.get('message', '').lower()
             if 'chi tiết' in message or 'detail' in message:
                 response['message'] += "\n\nChi tiết chiến dịch:\n" + "\n".join([
                     f"- Chiến dịch: {campaign['name']}\n"
@@ -275,4 +322,28 @@ async def query_marketing(request: ChatMessageRequest):
 @router.get("/")
 async def list_campaigns():
     """List all marketing campaigns in a shop"""
-    return {"message": "List campaigns endpoint"} 
+    return {"message": "List campaigns endpoint"}
+
+def extract_campaign_info_from_message(message: str) -> dict:
+    info = {}
+    # Mục tiêu/chiến dịch
+    match_goal = re.search(r'(sale|khuyến mãi|chiến lược|chiến dịch|promotion|campaign)[^\n]*', message, re.IGNORECASE)
+    if match_goal:
+        info['campaign_goal'] = match_goal.group(0).strip()
+    # Ngân sách
+    match_budget = re.search(r'(\d+\s*(tr|triệu|million|m))', message, re.IGNORECASE)
+    if match_budget:
+        info['budget'] = match_budget.group(0).strip()
+    # Kênh quảng bá
+    match_channels = re.search(r'(facebook|google|email|zalo|tiktok|instagram)', message, re.IGNORECASE)
+    if match_channels:
+        info['channels'] = match_channels.group(0).strip()
+    # Thời gian
+    match_duration = re.search(r'(từ\s*\d{1,2}/\d{1,2}(-|đến|–)\d{1,2}/\d{1,2})', message, re.IGNORECASE)
+    if match_duration:
+        info['duration'] = match_duration.group(0).strip()
+    # Đối tượng
+    match_target = re.search(r'(tất cả khách hàng|khách hàng|everyone|all customers)', message, re.IGNORECASE)
+    if match_target:
+        info['target_audience'] = match_target.group(0).strip()
+    return info

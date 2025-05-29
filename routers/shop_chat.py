@@ -68,9 +68,28 @@ async def process_message(session_id: int, message: str, shop_id: int, db: Sessi
         logger.info(f"Response from shop chat: {response}")
         logger.info(f"Response type: {type(response)}")
         print(f"✅🤦‍♀️➡️❎💣😊🙌😁Response: {response}")
+
+        if response["agent"] == "MakertingAgent":
+            
+            service.add_message(
+                ChatMessageCreate(
+                    chat_id=session_id,
+                    sender_type="MakertingAgent",
+                    sender_id=shop_id,
+                    content=response["response"]["content"],
+                    message_metadata=response.get(
+                        "context", {} if isinstance(response, dict) else {}
+                    ),
+                )
+            )
+            return response["response"]["content"]
+
         answer = shop_manager.process_chat_message(message, response, shop_id, session_id)
+
         if asyncio.iscoroutine(answer):
             answer = await answer
+
+        print(f"😍💣💣💣💣💣🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️🤦‍♂️{answer}")
         logger.info(f"Answer from shop manager: {answer}")
 
         # Ensure the message content is a string

@@ -17,6 +17,8 @@ from models.inventories import Inventory
 import traceback
 from decimal import Decimal
 import openai
+from openai import AsyncOpenAI
+from env import env
 
 # Custom JSON encoder để xử lý Decimal
 class DecimalEncoder(json.JSONEncoder):
@@ -335,6 +337,7 @@ Lưu ý:
 
     async def analyze_intent(self, message: str, chat_history: str = "") -> dict:
         """Use GPT-4o-mini to analyze user intent and context."""
+        client = AsyncOpenAI(api_key=env.OPENAI_API_KEY)
         prompt = f"""
 Bạn là AI phân tích mục đích và ngữ cảnh tin nhắn của người dùng trong hệ thống quản lý shop. Hãy trả lời JSON với các trường:
 {{
@@ -346,14 +349,14 @@ Bạn là AI phân tích mục đích và ngữ cảnh tin nhắn của người
 Ngữ cảnh chat (nếu có): {chat_history}
 Tin nhắn mới: {message}
 """
-        response = openai.ChatCompletion.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=512,
             temperature=0.2
         )
         import json as pyjson
-        content = response["choices"][0]["message"]["content"]
+        content = response.choices[0].message.content
         try:
             result = pyjson.loads(content)
         except Exception:
@@ -374,148 +377,106 @@ class Analytics:
 
     async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process an analytics request with intent analysis."""
+        print("💣🤦‍♂️💣💣💣✅✅✅✅✅✅✅✅✅ ânlytics debug ")
+        print(f" request.get('shop_id')")
         try:
             shop_id = request.get('shop_id') or self.shop_id
             message = request.get('message', '')
             chat_history = request.get('chat_history', '')
             if not shop_id:
-                return {
-                    "message": "Không tìm thấy thông tin shop.",
-                    "type": "error"
-                }
+                return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
 
             # Phân tích intent bằng GPT-4o-mini
             intent_result = await self.agent.analyze_intent(message, chat_history)
             intent = intent_result.get("intent", "other")
 
-            if intent == "deny_complaint":
-                return {
-                    "message": "Tôi đã ghi nhận, hiện tại không có khách hàng nào phàn nàn trực tiếp với bạn. Nếu có phản hồi cụ thể, bạn hãy cung cấp để tôi hỗ trợ xử lý.",
-                    "type": "text"
-                }
-            elif intent == "real_complaint":
+            analytics_data = await self._get_shop_analytics(shop_id)
+
+            # Báo cáo tổng quan
+            if intent == "export_report" or any(kw in message.lower() for kw in [
+                "xuất báo cáo", "báo cáo tổng quan", "báo cáo cho cửa hàng", "báo cáo shop", "báo cáo chung", "báo cáo về cửa hàng", "báo cáo tổng thể"
+            ]):
+                report = self._build_overview_report(analytics_data)
+                return {"message": report, "type": "text", "data": analytics_data}
+            # Báo cáo doanh thu
+            elif intent == "export_report_revenue" or "doanh thu" in message.lower():
+                report = self._build_revenue_report(analytics_data)
+                return {"message": report, "type": "text", "data": analytics_data}
+            # Báo cáo tồn kho
+            elif intent == "export_report_inventory" or "tồn kho" in message.lower():
+                report = self._build_inventory_report(analytics_data)
+                return {"message": report, "type": "text", "data": analytics_data}
+            # Báo cáo sản phẩm
+            elif intent == "export_report_products" or "sản phẩm" in message.lower():
+                report = self._build_products_report(analytics_data)
+                return {"message": report, "type": "text", "data": analytics_data}
+            # Báo cáo khách hàng
+            elif intent == "export_report_customers" or "khách hàng" in message.lower():
+                report = self._build_customers_report(analytics_data)
+                return {"message": report, "type": "text", "data": analytics_data}
+            # Báo cáo đánh giá
+            elif intent == "export_report_reviews" or "đánh giá" in message.lower():
+                report = self._build_reviews_report(analytics_data)
+                return {"message": report, "type": "text", "data": analytics_data}
+
+            # Báo cáo sản phẩm bán chạy nhất
+            if intent in ['sales_analysis', 'best_selling_product'] or (request.get('context', {}) and request['context'].get('topic') == 'best_selling_product'):
+                best_product = self.db.query(Product).filter(Product.seller_id == shop_id).order_by(Product.quantity_sold.desc()).first()
+                if best_product:
+                    return {
+                        "message": f"""# Sản phẩm bán chạy nhất\n\n- Tên sản phẩm: {best_product.name}\n- Đã bán: {best_product.quantity_sold:,} sản phẩm\n- Doanh thu: {best_product.quantity_sold * best_product.price:,.0f} VNĐ""",
+                        "type": "text",
+                        "data": {
+                            "product_id": best_product.product_id,
+                            "name": best_product.name,
+                            "quantity_sold": best_product.quantity_sold,
+                            "revenue": float(best_product.quantity_sold * best_product.price)
+                        }
+                    }
+                else:
+                    return {
+                        "message": "Không tìm thấy sản phẩm bán chạy nhất.",
+                        "type": "text"
+                    }
+
+            # Route các intent không phải báo cáo/thống kê/phân tích sang agent khác
+            if intent in ["deny_complaint", "real_complaint"]:
                 from .customer_service import CustomerService
                 customer_service = CustomerService(self.db, shop_id)
                 return await customer_service.process({
                     "message": message,
-                    "shop_id": shop_id
+                    "shop_id": shop_id,
+                    "chat_history": chat_history,
+                    "intent": intent
                 })
             elif intent == "product_info":
                 from .product_management import ProductManagement
-                product_agent = ProductManagement(self.db, shop_id)
+                product_agent = ProductManagement(self.db)
                 return await product_agent.process({
                     "message": message,
-                    "shop_id": shop_id
+                    "shop_id": shop_id,
+                    "chat_history": chat_history,
+                    "intent": intent
                 })
-            elif intent == "chitchat":
+            elif intent in ["top_inventory_high", "top_inventory_low", "inventory_below_threshold", "inventory_above_threshold"]:
+                from .inventory import Inventory
+                inventory_agent = Inventory(self.db, shop_id)
+                return await inventory_agent.process({
+                    "message": message,
+                    "shop_id": shop_id,
+                    "chat_history": chat_history,
+                    "intent": intent
+                })
+            elif intent in ["chitchat", "other", "general", "greeting"]:
+                # ShopManager hoặc Myself tự trả lời
                 return {
                     "message": "Cảm ơn bạn đã trò chuyện! Nếu bạn cần hỗ trợ gì về shop, hãy đặt câu hỏi nhé!",
                     "type": "text"
                 }
-            elif intent == "top_inventory_high":
-                # Chỉ trả về danh sách sản phẩm tồn kho nhiều nhất
-                analytics_data = await self._get_shop_analytics(shop_id)
-                inventory_data = analytics_data.get("inventory", [])
-                products_data = {p["product_id"]: p for p in analytics_data.get("products", [])}
-                sorted_inventory = sorted(
-                    inventory_data,
-                    key=lambda x: x.get("current_stock", 0),
-                    reverse=True
-                )
-                top_5_high_stock = sorted_inventory[:5]
-                message_lines = ["Top 5 sản phẩm tồn kho nhiều nhất:"]
-                for idx, item in enumerate(top_5_high_stock, 1):
-                    p = products_data.get(item["product_id"], {})
-                    message_lines.append(f"{idx}. {p.get('name', 'Unknown')}: {item['current_stock']:,} sản phẩm, Giá: {p.get('price', 0):,.0f}₫, Đã bán: {p.get('quantity_sold', 0):,}, Đánh giá: {p.get('average_rating', 'N/A')}/5")
-                return {
-                    "message": "\n".join(message_lines),
-                    "type": "text",
-                    "data": top_5_high_stock
-                }
-            elif intent == "top_inventory_low":
-                # Chỉ trả về danh sách sản phẩm tồn kho ít nhất
-                analytics_data = await self._get_shop_analytics(shop_id)
-                inventory_data = analytics_data.get("inventory", [])
-                products_data = {p["product_id"]: p for p in analytics_data.get("products", [])}
-                # Sắp xếp tăng dần theo tồn kho
-                sorted_inventory = sorted(
-                    inventory_data,
-                    key=lambda x: x.get("current_stock", 0)
-                )
-                top_5_low_stock = sorted_inventory[:5]
-                message_lines = ["Top 5 sản phẩm còn ít nhất trong kho:"]
-                for idx, item in enumerate(top_5_low_stock, 1):
-                    p = products_data.get(item["product_id"], {})
-                    message_lines.append(
-                        f"{idx}. {p.get('name', 'Unknown')}: {item['current_stock']:,} sản phẩm, "
-                        f"Giá: {p.get('price', 0):,.0f}₫, Đã bán: {p.get('quantity_sold', 0):,}, "
-                        f"Đánh giá: {p.get('average_rating', 'N/A')}/5"
-                    )
-                return {
-                    "message": "\n".join(message_lines),
-                    "type": "text",
-                    "data": top_5_low_stock
-                }
-            elif intent == "inventory_below_threshold":
-                # Lọc sản phẩm tồn kho dưới ngưỡng do người dùng đặt ra
-                threshold = None
-                for ent in intent_result.get("entities", []):
-                    if ent.get("type") == "threshold":
-                        try:
-                            threshold = int(ent.get("value"))
-                        except Exception:
-                            pass
-                if threshold is None:
-                    return {"message": "Bạn vui lòng cung cấp ngưỡng tồn kho cần tra cứu.", "type": "text"}
-                analytics_data = await self._get_shop_analytics(shop_id)
-                inventory_data = analytics_data.get("inventory", [])
-                products_data = {p["product_id"]: p for p in analytics_data.get("products", [])}
-                filtered = [item for item in inventory_data if item.get("current_stock", 0) < threshold]
-                message_lines = [f"Sản phẩm tồn kho dưới {threshold}:"]
-                for idx, item in enumerate(filtered, 1):
-                    p = products_data.get(item["product_id"], {})
-                    message_lines.append(f"{idx}. {p.get('name', 'Unknown')}: {item['current_stock']:,} sản phẩm, Giá: {p.get('price', 0):,.0f}₫, Đã bán: {p.get('quantity_sold', 0):,}, Đánh giá: {p.get('average_rating', 'N/A')}/5")
-                return {
-                    "message": "\n".join(message_lines) if filtered else f"Không có sản phẩm nào tồn kho dưới {threshold}.",
-                    "type": "text",
-                    "data": filtered
-                }
-            elif intent == "inventory_above_threshold":
-                # Lọc sản phẩm tồn kho trên ngưỡng do người dùng đặt ra
-                threshold = None
-                for ent in intent_result.get("entities", []):
-                    if ent.get("type") == "threshold":
-                        try:
-                            threshold = int(ent.get("value"))
-                        except Exception:
-                            pass
-                if threshold is None:
-                    return {"message": "Bạn vui lòng cung cấp ngưỡng tồn kho cần tra cứu.", "type": "text"}
-                analytics_data = await self._get_shop_analytics(shop_id)
-                inventory_data = analytics_data.get("inventory", [])
-                products_data = {p["product_id"]: p for p in analytics_data.get("products", [])}
-                filtered = [item for item in inventory_data if item.get("current_stock", 0) > threshold]
-                message_lines = [f"Sản phẩm tồn kho trên {threshold}:"]
-                for idx, item in enumerate(filtered, 1):
-                    p = products_data.get(item["product_id"], {})
-                    message_lines.append(f"{idx}. {p.get('name', 'Unknown')}: {item['current_stock']:,} sản phẩm, Giá: {p.get('price', 0):,.0f}₫, Đã bán: {p.get('quantity_sold', 0):,}, Đánh giá: {p.get('average_rating', 'N/A')}/5")
-                return {
-                    "message": "\n".join(message_lines) if filtered else f"Không có sản phẩm nào tồn kho trên {threshold}.",
-                    "type": "text",
-                    "data": filtered
-                }
-            # fallback: xử lý như cũ
-            try:
-                # Lấy thông tin phân tích của shop
-                analytics_data = await self._get_shop_analytics(shop_id)
-            except Exception as e:
-                # Rollback transaction nếu có lỗi
-                self.db.rollback()
-                logger.error(f"Error getting analytics data: {str(e)}")
-                return {
-                    "message": "Không thể lấy dữ liệu phân tích. Vui lòng thử lại sau.",
-                    "type": "error"
-                }
+            # Chỉ xử lý các intent liên quan đến báo cáo/thống kê/phân tích ở dưới đây
+            # ... giữ lại các xử lý báo cáo/thống kê/phân tích ...
+            # Lấy thông tin phân tích của shop
+            analytics_data = await self._get_shop_analytics(shop_id)
 
             if not analytics_data:
                 return {
@@ -545,7 +506,7 @@ class Analytics:
 
 📦 **Thống kê Sản phẩm**:
 - Tổng số sản phẩm: {analytics_data.get('metrics', {}).get('total_products', 0):,} sản phẩm
-- Sản phẩm còn tồn kho: {analytics_data.get('metrics', {}).get('products_in_stock', 0):,} sản phẩm
+- Sản phẩm còn hàng trong kho: {analytics_data.get('metrics', {}).get('products_in_stock', 0):,} sản phẩm
 - Sản phẩm đã bán: {analytics_data.get('metrics', {}).get('total_sold', 0):,} sản phẩm
 - Giá trị tồn kho: {analytics_data.get('metrics', {}).get('total_inventory_value', 0):,.0f} VNĐ
 
@@ -607,7 +568,7 @@ Cửa hàng hiện đang giữ {analytics_data.get('metrics', {}).get('products_
 
 📦 **Thống kê Sản phẩm**:
 - Tổng số sản phẩm: {analytics_data.get('metrics', {}).get('total_products', 0):,} sản phẩm
-- Sản phẩm còn tồn kho: {analytics_data.get('metrics', {}).get('products_in_stock', 0):,} sản phẩm
+- Sản phẩm còn hàng trong kho: {analytics_data.get('metrics', {}).get('products_in_stock', 0):,} sản phẩm
 - Sản phẩm đã bán: {analytics_data.get('metrics', {}).get('total_sold', 0):,} sản phẩm
 
 💰 **Doanh thu**:
@@ -739,7 +700,7 @@ Cửa hàng hiện đang giữ {analytics_data.get('metrics', {}).get('products_
                 "products_in_stock": products_in_stock,
                 "total_sold": total_sold,
                 "total_inventory_value": float(total_inventory_value),
-                "average_order_value": float(total_revenue / total_orders if total_orders > 0 else 0),
+                "average_order_value": float(total_revenue / total_sold if total_sold > 0 else 0),
                 "customer_lifetime_value": float(total_revenue / total_customers if total_customers > 0 else 0),
                 "conversion_rate": float(total_orders / total_customers * 100 if total_customers > 0 else 0),
                 "average_rating": float(sum(r.average_rating for r in reviews) / len(reviews) if reviews else 0),
@@ -845,6 +806,115 @@ Cửa hàng hiện đang giữ {analytics_data.get('metrics', {}).get('products_
     async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a general analytics request."""
         return await self.process(request)
+
+    def _build_overview_report(self, analytics_data: dict) -> str:
+        return f'''
+# Báo cáo tổng quan cửa hàng
+
+- Tổng doanh thu: {analytics_data.get('total_revenue', 0):,.0f} VNĐ
+- Tổng số đơn hàng: {analytics_data.get('total_orders', 0)}
+- Tổng số sản phẩm: {analytics_data.get('metrics', {}).get('total_products', 0)}
+- Sản phẩm còn hàng kho: {analytics_data.get('metrics', {}).get('products_in_stock', 0)}
+- Tổng số khách hàng: {analytics_data.get('total_customers', 0)}
+- Điểm đánh giá trung bình: {analytics_data.get('metrics', {}).get('average_rating', 0):.1f}/5
+- Tổng số đánh giá: {analytics_data.get('metrics', {}).get('total_reviews', 0)}
+
+Bạn muốn xuất báo cáo chi tiết về doanh số, tồn kho, sản phẩm hay khách hàng không? Hãy nói rõ hơn nhé!
+'''
+
+    def _build_revenue_report(self, analytics_data: dict) -> str:
+        return f'''
+# Báo cáo doanh thu
+
+- Tổng doanh thu: {analytics_data.get('total_revenue', 0):,.0f} VNĐ
+- Tổng số đơn hàng trong tháng: {analytics_data.get('total_orders', 0)}
+- Giá trị trung bình mỗi đơn hàng: {analytics_data.get('metrics', {}).get('average_order_value', 0):,.0f} VNĐ
+'''
+
+    def _build_inventory_report(self, analytics_data: dict) -> str:
+        inventory = analytics_data.get('inventory', [])
+        products = {p['product_id']: p for p in analytics_data.get('products', [])}
+        # Sắp xếp tồn kho giảm dần
+        sorted_inventory = sorted(inventory, key=lambda x: x.get('current_stock', 0), reverse=True)
+        top_5_high = sorted_inventory[:5]
+        top_5_low = sorted_inventory[-5:][::-1] if len(sorted_inventory) > 5 else []
+        remaining = len(sorted_inventory) - 5 if len(sorted_inventory) > 5 else 0
+
+        report = f'''
+# Báo cáo tồn kho
+
+- Tổng số sản phẩm: {analytics_data.get('metrics', {}).get('total_products', 0)}
+- Sản phẩm còn hàng trong kho: {analytics_data.get('metrics', {}).get('products_in_stock', 0)}
+- Giá trị tồn kho: {analytics_data.get('metrics', {}).get('total_inventory_value', 0):,.0f} VNĐ
+
+🏆 **Top 5 sản phẩm tồn kho nhiều nhất:**'''
+        for idx, item in enumerate(top_5_high, 1):
+            p = products.get(item['product_id'], {})
+            report += f"\n{idx}. {p.get('name', 'Unknown')} - {item.get('current_stock', 0):,} sản phẩm"
+        if remaining > 0:
+            report += f"\n📝 **Còn {remaining:,} sản phẩm khác trong kho**"
+
+        if top_5_low:
+            report += '\n\n⚠️ **Top 5 sản phẩm tồn kho ít nhất:**'
+            for idx, item in enumerate(top_5_low, 1):
+                p = products.get(item['product_id'], {})
+                report += f"\n{idx}. {p.get('name', 'Unknown')} - {item.get('current_stock', 0):,} sản phẩm"
+
+        return report
+
+    def _build_products_report(self, analytics_data: dict) -> str:
+        # Sắp xếp sản phẩm theo số lượng bán
+        sorted_products = sorted(
+            analytics_data.get('products', []),
+            key=lambda x: x.get('quantity_sold', 0),
+            reverse=True
+        )
+        
+        # Lấy top 5 sản phẩm bán chạy nhất
+        top_5_products = sorted_products[:5]
+        remaining_products = len(sorted_products) - 5
+        
+        report = f'''
+# Báo cáo sản phẩm
+
+📊 **Thống kê tổng quan**:
+- Tổng số sản phẩm: {analytics_data.get('metrics', {}).get('total_products', 0):,} sản phẩm
+- Sản phẩm đã bán: {analytics_data.get('metrics', {}).get('total_sold', 0):,} sản phẩm
+
+🏆 **Top 5 sản phẩm bán chạy nhất**:
+'''
+        
+        # Thêm thông tin chi tiết cho top 5 sản phẩm
+        for idx, product in enumerate(top_5_products, 1):
+            report += f'''
+{idx}. {product.get('name', 'Unknown')}
+   - Đã bán: {product.get('quantity_sold', 0):,} sản phẩm
+   - Giá: {product.get('price', 0):,.0f} VNĐ
+   - Tồn kho: {product.get('current_stock', 0):,} sản phẩm
+'''
+        
+        # Thêm thông tin về số sản phẩm còn lại
+        if remaining_products > 0:
+            report += f'''
+📝 **Còn {remaining_products:,} sản phẩm khác trong shop**'''
+        
+        return report
+
+    def _build_customers_report(self, analytics_data: dict) -> str:
+        return f'''
+# Báo cáo khách hàng
+
+- Tổng số khách hàng: {analytics_data.get('total_customers', 0)}
+- Giá trị khách hàng trung bình: {analytics_data.get('metrics', {}).get('customer_lifetime_value', 0):,.0f} VNĐ
+'''
+
+    def _build_reviews_report(self, analytics_data: dict) -> str:
+        return f'''
+# Báo cáo đánh giá
+
+- Điểm đánh giá trung bình: {analytics_data.get('metrics', {}).get('average_rating', 0):.1f}/5
+- Tổng số đánh giá: {analytics_data.get('metrics', {}).get('total_reviews', 0)}
+'''
 
 @router.post("/query")
 async def query_analytics(request: ChatMessageRequest):

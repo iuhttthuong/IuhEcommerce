@@ -83,14 +83,55 @@ Khi trả lời, bạn cần:
     async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a product management request."""
         try:
-            message = request.get('message', '')
             shop_id = request.get('shop_id')
+            message = request.get('message', '').lower().strip()
             chat_history = request.get('chat_history', '')
+            intent = request.get('intent', '')
             
             if not shop_id:
+                return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
+
+            # Nếu intent là product_info, trả về thông tin sản phẩm tổng quan
+            if intent == "product_info":
+                products = self.product_repository.get_by_shop(shop_id)
+                if not products:
+                    return {
+                        "message": "Shop chưa có sản phẩm nào.",
+                        "type": "text",
+                        "total_products": 0,
+                        "products": []
+                    }
                 return {
-                    "message": "Không tìm thấy thông tin shop.",
-                    "type": "error"
+                    "message": f"Shop hiện có {len(products)} sản phẩm. Bạn có thể xem danh sách, thống kê, chi tiết, phân tích hiệu quả, tối ưu sản phẩm, ...",
+                    "type": "text",
+                    "total_products": len(products),
+                    "products": [p.__dict__ for p in products]
+                }
+
+            # Xử lý sản phẩm chưa bán được hàng (đặt ngay sau khi lấy products)
+            if intent == "unsold_products" or "chưa bán được" in message or "chưa có đơn" in message:
+                products = self.product_repository.get_by_shop(shop_id)
+                unsold = [p for p in products if getattr(p, "quantity_sold", 0) == 0]
+                if not unsold:
+                    return {
+                        "message": "Tất cả sản phẩm của shop đều đã có đơn hàng.",
+                        "type": "text",
+                        "total_products": 0,
+                        "products": []
+                    }
+                # Format danh sách sản phẩm chưa bán được
+                product_info = "\n".join(
+                    f"- {p.name} (ID: {getattr(p, 'product_id', 'N/A')}):\n"
+                    f"  + Giá: {getattr(p, 'price', 'N/A'):,}đ\n"
+                    f"  + Tồn kho: {getattr(p, 'current_stock', 'N/A')}\n"
+                    f"  + Fulfillment: {getattr(p, 'fulfillment_type', 'N/A')}\n"
+                    for p in unsold
+                )
+                return {
+                    "message": f"Danh sách sản phẩm chưa bán được hàng:\n{product_info}",
+                    "type": "unsold_products",
+                    "total_products": len(unsold),
+                    "products": [p.__dict__ for p in unsold]
                 }
 
             # Tạo prompt cho LLM
@@ -235,11 +276,32 @@ class ProductManagement:
         """Process a product management request for shop, support statistics, listing, search, and analysis."""
         try:
             shop_id = request.get('shop_id')
-            message = request.get('message', '').lower()
+            message = request.get('message', '').lower().strip()
             chat_history = request.get('chat_history', '')
             
             if not shop_id:
                 return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
+
+            # Danh sách các lựa chọn tương ứng với số thứ tự
+            options = [
+                "Xem danh sách sản phẩm",
+                "Xem thống kê sản phẩm",
+                "Xem chi tiết sản phẩm",
+                "Phân tích hiệu quả sản phẩm",
+                "Tối ưu sản phẩm",
+                "Xem thống kê theo danh mục",
+                "Xem doanh thu theo sản phẩm"
+            ]
+
+            # Nếu người dùng chỉ gửi số, ánh xạ sang truy vấn tương ứng
+            if message.isdigit():
+                idx = int(message) - 1
+                if 0 <= idx < len(options):
+                    # Gọi lại process với message mới là lựa chọn tương ứng
+                    return await self.process({
+                        **request,
+                        "message": options[idx].lower()
+                    })
 
             # Get products from repository
             products = self.product_repository.get_by_shop(shop_id)

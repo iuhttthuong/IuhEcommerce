@@ -9,8 +9,19 @@ from datetime import datetime
 import logging
 from sqlalchemy.orm import Session
 import traceback
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,  # hoặc DEBUG nếu muốn ghi chi tiết
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler("logs/app.log"),  # Ghi vào file
+        logging.StreamHandler(),  # Đồng thời in ra console
+    ],
+)
 
 logger = logging.getLogger(__name__)
+
 
 # Base configuration for shop agents
 config_list = [
@@ -212,10 +223,10 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
         )
         logger.info(f"Raw ShopManager response: {chat}")
         logger.info(f"Response type: {type(chat)}")
-    
+        print(f"angent phản hồi: {chat}")
         # Handle the response content
         parsed_content = None
-        
+
         if isinstance(chat, dict):
             logger.info("Response is a dictionary")
             parsed_content = chat
@@ -250,23 +261,23 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
                 "agent": "AnalyticsAgent" if "đánh giá" in request.message.lower() else "PolicyAgent" if "chính sách" in request.message.lower() else "ProductManagementAgent",
                 "query": request.message
             }
-        
+
         logger.info(f"Parsed content: {parsed_content}")
-        
+        print(f"parsed content: {parsed_content}")
         # Extract agent and query from the parsed content
         agent_type = parsed_content.get("agent")
         query = parsed_content.get("query")
-        
+
         if not agent_type or not query:
             logger.error("Missing agent or query in response")
             raise ValueError("Missing agent or query in response")
-        
+
         # Route to appropriate agent based on agent type
         if agent_type == "ProductManagementAgent":
             from shop_chat.product_management import ProductManagement
             from sqlalchemy.orm import Session
             from db import SessionLocal
-            
+
             # Create a new database session
             db = SessionLocal()
             try:
@@ -276,14 +287,14 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
                     "shop_id": request.shop_id,
                     "chat_history": request.context.get("chat_history", "")
                 })
-                
+
                 # Ensure the response content is a string
                 response_content = result.get('message', '')
                 if response_content is None:
                     response_content = "Không có phản hồi từ hệ thống."
                 elif not isinstance(response_content, str):
                     response_content = str(response_content)
-                
+
                 # Format the response according to the expected structure
                 return {
                     "agent": agent_type,
@@ -296,25 +307,25 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
                 }
             finally:
                 db.close()
-            
+
         elif agent_type == "MarketingAgent":
             from shop_chat.marketing import MarketingAgent
-            from sqlalchemy.orm import Session
             from db import SessionLocal
-            
+            print("❎❎ agne tmarrketing dược chọn")
             # Create a new database session
             db = SessionLocal()
             try:
-                agent = MarketingAgent(shop_id=request.shop_id, db=db)
+                agent = MarketingAgent(shop_id=request.shop_id)
+                print(f"🙌🙌🙌🛒🛒🛒🛒request: {request}")
                 result = await agent.process(request)
-
+                # print(f"🧠✅❎❎💣 kết quả của agent makerting: {result}")
                 # Ensure the response content is a string
                 response_content = result.get('message', '')
                 if response_content is None:
                     response_content = "Không có phản hồi từ hệ thống."
                 elif not isinstance(response_content, str):
                     response_content = str(response_content)
-
+                
                 return {
                     "agent": agent_type,
                     "response": {
@@ -331,7 +342,7 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
             from shop_chat.analytics import Analytics
             from sqlalchemy.orm import Session
             from db import SessionLocal
-            
+
             # Create a new database session
             db = SessionLocal()
             try:
@@ -365,7 +376,7 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
             from shop_chat.policy import PolicyAgent
             from sqlalchemy.orm import Session
             from db import SessionLocal
-            
+
             # Create a new database session
             db = SessionLocal()
             try:
@@ -400,7 +411,7 @@ async def process_shop_chat(request: ShopRequest) -> Dict[str, Any]:
             from shop_chat.product_management import ProductManagement
             from sqlalchemy.orm import Session
             from db import SessionLocal
-            
+
             # Create a new database session
             db = SessionLocal()
             try:

@@ -16,6 +16,7 @@ from qdrant_client.http import models as qdrant_models
 from env import env
 from services.search import SearchServices
 import traceback
+from .product_management import ProductManagement
 
 router = APIRouter(prefix="/shop/inventory", tags=["Shop Inventory"])
 
@@ -149,9 +150,74 @@ class Inventory:
             shop_id = request.get('shop_id') or self.shop_id
             message = request.get('message', '').lower()
             chat_history = request.get('chat_history', '')
+            intent = request.get('intent', '')
             
             if not shop_id:
                 return {"message": "Không tìm thấy thông tin shop.", "type": "error"}
+
+            # Xử lý intent thống kê tồn kho
+            if intent == "top_inventory_high":
+                # Lấy top 5 sản phẩm tồn kho nhiều nhất
+                inventory = await self.inventory_repository.get_by_product_id(str(shop_id))
+                inventory_items = [inventory] if not isinstance(inventory, list) else inventory
+                sorted_items = sorted(inventory_items, key=lambda x: x.current_stock, reverse=True)
+                top_5 = sorted_items[:5]
+                return {
+                    "message": f"Top 5 sản phẩm tồn kho nhiều nhất: {', '.join(str(item.product_id) for item in top_5)}",
+                    "type": "text",
+                    "data": [item.__dict__ for item in top_5]
+                }
+            elif intent == "top_inventory_low":
+                inventory = await self.inventory_repository.get_by_product_id(str(shop_id))
+                inventory_items = [inventory] if not isinstance(inventory, list) else inventory
+                sorted_items = sorted(inventory_items, key=lambda x: x.current_stock)
+                top_5 = sorted_items[:5]
+                return {
+                    "message": f"Top 5 sản phẩm tồn kho ít nhất: {', '.join(str(item.product_id) for item in top_5)}",
+                    "type": "text",
+                    "data": [item.__dict__ for item in top_5]
+                }
+            elif intent == "inventory_below_threshold":
+                threshold = None
+                for ent in request.get("entities", []):
+                    if ent.get("type") == "threshold":
+                        try:
+                            threshold = int(ent.get("value"))
+                        except Exception:
+                            pass
+                if threshold is None:
+                    return {"message": "Bạn vui lòng cung cấp ngưỡng tồn kho cần tra cứu.", "type": "text"}
+                inventory = await self.inventory_repository.get_by_product_id(str(shop_id))
+                inventory_items = [inventory] if not isinstance(inventory, list) else inventory
+                filtered = [item for item in inventory_items if item.current_stock < threshold]
+                return {
+                    "message": f"Sản phẩm tồn kho dưới {threshold}: {', '.join(str(item.product_id) for item in filtered)}",
+                    "type": "text",
+                    "data": [item.__dict__ for item in filtered]
+                }
+            elif intent == "inventory_above_threshold":
+                threshold = None
+                for ent in request.get("entities", []):
+                    if ent.get("type") == "threshold":
+                        try:
+                            threshold = int(ent.get("value"))
+                        except Exception:
+                            pass
+                if threshold is None:
+                    return {"message": "Bạn vui lòng cung cấp ngưỡng tồn kho cần tra cứu.", "type": "text"}
+                inventory = await self.inventory_repository.get_by_product_id(str(shop_id))
+                inventory_items = [inventory] if not isinstance(inventory, list) else inventory
+                filtered = [item for item in inventory_items if item.current_stock > threshold]
+                return {
+                    "message": f"Sản phẩm tồn kho trên {threshold}: {', '.join(str(item.product_id) for item in filtered)}",
+                    "type": "text",
+                    "data": [item.__dict__ for item in filtered]
+                }
+
+            # Nếu intent là hỏi về sản phẩm chưa bán được hàng, tự động gọi sang ProductManagementAgent
+            if intent == "unsold_products" or "chưa bán được" in message or "chưa có đơn" in message:
+                product_management = ProductManagement(self.db)
+                return await product_management.process(request)
 
             # Lấy thông tin tồn kho
             inventory = await self.inventory_repository.get_by_product_id(str(shop_id))
