@@ -65,6 +65,7 @@ data/
 collections/
 ./minio_data/
 ./mongo_data/
+./policies/
 
 # Python
 __pycache__/
@@ -116,7 +117,6 @@ raft_state.json
 data/
 collections/
 crawl_datas/
-import_data/
 minio_data/
 mongo_data/
 *.csv
@@ -167,3 +167,5 @@ docker-compose.override.yml
 
 # Project specific
 poetry.lock
+
+.deleted/
